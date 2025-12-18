@@ -13,7 +13,7 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
 st.title("🧞‍♂️ AI 마케팅 카피 생성기(User Growth)")
-st.markdown(f"📢User Growth를 위한 AI 문구생성기입니다. 좋은 카피가 안나온다면 요청사항에 추가해주세요.")
+st.markdown(f"User Growth를 위한 AI 문구생성기입니다. 🤯좋은 카피가 안나온다면 필요내용을 요청사항에 넣어주세요.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
