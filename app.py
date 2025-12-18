@@ -14,8 +14,8 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
-st.title("⚡ AI 마케팅 카피 생성기 (Deep Learning Fix)")
-st.markdown("데이터가 제대로 들어갔는지 확인하는 **디버깅 모드**가 추가되었습니다.")
+st.title("⚡ AI 마케팅 카피 생성기 (Length & Language Fix)")
+st.markdown("글자수 확장(60자) + 외국어(아랍어/한자/일어) 완벽 차단 버전입니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
@@ -28,12 +28,21 @@ with st.sidebar:
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
-# --- 🔧 유틸리티: 텍스트 청소 ---
-def clean_text_force_korean(text):
-    # 한자/일본어 삭제
-    pattern = re.compile(r'[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]+')
-    cleaned_text = pattern.sub('', text)
-    return cleaned_text
+# --- 🔧 유틸리티: 강력한 텍스트 청소 ---
+def clean_text_strict(text):
+    """
+    한글, 영어, 숫자, 기본 기호, 이모지만 남기고 싹 다 지움 (아랍어, 한자 등 제거)
+    """
+    if not isinstance(text, str): return str(text)
+
+    # 1. 제거할 문자 범위 정의 (CJK 한자, 히라가나, 카타카나, 아랍어 등)
+    # 아랍어: \u0600-\u06FF, 한자/일어 등 포함
+    foreign_pattern = re.compile(r'[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u0600-\u06FF]+')
+    text = foreign_pattern.sub('', text)
+    
+    # 2. 불필요한 공백 정리
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 # --- 🔧 핵심 함수: Groq 호출 ---
 def generate_copy_groq(api_key, context_examples, keyword, info, user_config):
@@ -43,30 +52,25 @@ def generate_copy_groq(api_key, context_examples, keyword, info, user_config):
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
     if user_config['note']: custom_instruction += f"- 요청사항: {user_config['note']}\n"
 
-    # 참고 데이터가 비었을 경우를 대비한 강제 페르소나 주입
+    # 시트 데이터가 없을 때를 대비한 기본 예시 (길이감 조정)
     if not context_examples:
         context_examples = """
         (Example 1)
-        Title: X와의 재회, 심장 멎는 줄..
-        Body: 내 눈앞에 나타난 전남친, 흔들리는 동공 ㄷㄷ #환승연애 #재회
+        Title: 환승연애4 역대급 재회 장면 떴다!
+        Body: "너 아직 나 좋아해?" X의 질문에 흔들리는 눈빛.. 오늘 밤 9시 본방사수! #도파민 #과몰입
         
         (Example 2)
-        Title: 거짓말 탐지기 결과 충격 😱
-        Body: "너 아직 나 좋아해?" 질문에 대한 대답은? #과몰입 #도파민
+        Title: 이번 시즌 비주얼 무슨 일이야? ㄷㄷ
+        Body: 출연진 비주얼 미쳤다 진짜.. 예고편만 봐도 심장 터질 것 같음 ㅠㅠ 얼른 보러가자!
         """
 
     prompt = f"""
-    Role: You are a Viral Marketing Copywriter for a Dating Reality Show (like Transit Love/EXchange).
+    Role: You are a Viral Marketing Copywriter for a Dating Reality Show (target: Korea).
     
-    [YOUR MISSION]
+    [Mission]
     Create 10 marketing messages for '{keyword}'.
     
-    [CRITICAL INSTRUCTION: STYLE TRANSFER]
-    You MUST analyze the [Reference Examples] below. 
-    Copy their **sentence structure**, **slang usage**, **emotional tone**, and **emoji patterns**.
-    Do NOT write polite or educational text. Write like a gossiping friend or a provocative ad.
-
-    [Reference Examples (LEARN FROM HERE)]
+    [Reference Examples (Tone & Manner)]
     {context_examples}
     
     [Trend Info]
@@ -75,12 +79,14 @@ def generate_copy_groq(api_key, context_examples, keyword, info, user_config):
     [User Request]
     {custom_instruction}
 
-    [Constraints]
-    1. **Language:** Korean (Hangul) ONLY. No Hanja.
-    2. **Format:** CSV with '|' separator.
-    3. **Columns:** 분류|캠페인|타겟|콘텐츠|제목|내용
-    4. **Tone:** Provocative, Emotional, "Dopamine-inducing", Short slang (e.g., ㄷㄷ, ㅠㅠ, ㅋㅋ).
-    5. **Length:** Title < 20 chars, Body < 40 chars.
+    [CRITICAL RULES]
+    1. **Language:** Korean (Hangul) ONLY. (Absolutely NO Chinese, Arabic, Japanese).
+    2. **Length Strategy:**
+       - **Title:** Write about **20~25 characters**. (Not too short).
+       - **Body:** Write about **40~50 characters** of pure content. (Legal text will be added later, so provide enough substance).
+    3. **Tone:** Gossip-style, emotional, engaging, using Korean slang (ㅋㅋ, ㄷㄷ, ㅠㅠ).
+    4. **Format:** CSV with '|' separator.
+    5. **Columns:** 대분류|캠페인|타겟|콘텐츠|제목|내용
 
     **Output ONLY the CSV data.**
     """
@@ -89,7 +95,7 @@ def generate_copy_groq(api_key, context_examples, keyword, info, user_config):
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.9, # 창의성 최대치 (자극적인 문구를 위해)
+            temperature=0.7, # 0.9 -> 0.7 (환각 방지, 안정성 강화)
             max_tokens=2048,
             top_p=1,
             stream=False,
@@ -100,42 +106,37 @@ def generate_copy_groq(api_key, context_examples, keyword, info, user_config):
     except Exception as e:
         raise Exception(f"Groq API 오류: {str(e)}")
 
-# --- (정보 수집 함수들 - 시트 데이터 가공 강화) ---
+# --- (정보 수집 함수들) ---
 
 def get_sheet_data_as_examples(sheet_id, gid):
     try:
         url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
-        
-        # 데이터 읽기 (에러 무시 모드)
         df = pd.read_csv(url, encoding='utf-8', on_bad_lines='skip', engine='python')
         
         if df.empty: return None, pd.DataFrame()
 
-        # NaN 제거
         df = df.fillna("")
         
-        # '제목'과 '내용' 컬럼이 있는지 확인하고, 있으면 그것 위주로 학습
-        # 컬럼명을 못 찾을 경우를 대비해 컬럼 인덱스로 접근 시도
+        # 제목/내용 컬럼 찾기
         title_col = None
         body_col = None
-
         for col in df.columns:
             if '제목' in col: title_col = col
             if '내용' in col: body_col = col
             
         examples = ""
-        # 제목/내용 컬럼을 찾았으면 그것만 뽑아서 예시로 만듦 (AI가 이해하기 쉽게)
         if title_col and body_col:
-            # 학습용으로 20개 샘플링
+            # 20개 샘플링
             sample_df = df.sample(min(20, len(df)))
             for _, row in sample_df.iterrows():
+                # 데이터가 너무 짧으면 건너뛰기 (이상한 데이터 학습 방지)
+                if len(str(row[body_col])) < 5: continue
                 examples += f"Title: {row[title_col]}\nBody: {row[body_col]}\n---\n"
         else:
-            # 컬럼 못 찾으면 그냥 전체 텍스트로
             sample_df = df.sample(min(20, len(df)))
             examples = sample_df.to_string(index=False)
 
-        return examples, df # 학습용 텍스트와 원본 데이터프레임 반환
+        return examples, df
     except Exception as e:
         print(f"Sheet Error: {e}")
         return None, pd.DataFrame()
@@ -147,7 +148,7 @@ def get_naver_search(keyword):
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
         news = []
-        for item in soup.select(".news_area")[:3]: # 뉴스 3개만 (노이즈 감소)
+        for item in soup.select(".news_area")[:3]:
             title = item.select_one('.news_tit').get_text()
             news.append(f"- {title}")
         return "\n".join(news) if news else ""
@@ -161,20 +162,19 @@ with col2:
     campaign = st.text_input("🔖 캠페인명", placeholder="예: 런칭알림")
 col3, col4 = st.columns([1, 1])
 with col3:
-    target = st.text_input("🎯 타겟 설정", placeholder="예: 2030 여성, 전애인 미련")
+    target = st.text_input("🎯 타겟 설정", placeholder="예: 2030 여성, 도파민 중독자")
 with col4:
-    note = st.text_input("📝 요청사항", placeholder="예: 자극적으로, 맵게")
+    note = st.text_input("📝 요청사항", placeholder="예: 궁금증 유발, 길게")
 
-# --- 데이터 확인용 섹션 (사용자가 직접 확인 가능) ---
-with st.expander("📊 시트 데이터 연결 상태 확인 (클릭)", expanded=False):
+# --- 디버깅용 ---
+with st.expander("📊 시트 데이터 연결 상태 확인"):
     if st.button("데이터 로드 테스트"):
         examples, raw_df = get_sheet_data_as_examples(sheet_id_input, sheet_gid_input)
         if not raw_df.empty:
-            st.success(f"✅ 데이터 로드 성공! 총 {len(raw_df)}행을 읽었습니다.")
-            st.dataframe(raw_df.head(5)) # 상위 5개 보여줌
-            st.text_area("🤖 AI에게 들어가는 학습 데이터 예시", examples, height=200)
+            st.success(f"✅ 데이터 로드 성공! ({len(raw_df)}행)")
+            st.text_area("🤖 학습되는 데이터 예시", examples, height=200)
         else:
-            st.error("❌ 데이터를 읽어오지 못했습니다. 시트 권한이나 내용을 확인해주세요.")
+            st.error("❌ 데이터 로드 실패")
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
     if not keyword:
@@ -182,24 +182,18 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
-        status_box.write("🔍 최신 트렌드 수집 중...")
+        status_box.write("🔍 최신 뉴스 수집 중...")
         search_info = get_naver_search(keyword)
         
-        status_box.write("📚 시트 데이터 '말투' 추출 중...")
-        # 여기서 데이터를 확실하게 가져옵니다.
+        status_box.write("📚 시트 데이터 학습 중...")
         context_examples, _ = get_sheet_data_as_examples(sheet_id_input, sheet_gid_input)
         
-        if not context_examples:
-            status_box.write("⚠️ 시트 학습 실패! '기본 도파민 모드'로 작동합니다.")
-        
-        status_box.write("⚡ Groq 엔진으로 카피라이팅 중...")
+        status_box.write("⚡ Groq 엔진 가동 (글자수 확장 & 외국어 차단)...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             
-            # 생성
             raw_text, used_model = generate_copy_groq(FIXED_API_KEY, context_examples, keyword, search_info, config)
             
-            # CSV 파싱
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             if '|' in clean_csv:
                 lines = clean_csv.split('\n')
@@ -208,18 +202,24 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
 
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
             
-            # 법적 문구 & 글자수 & 한자 필터
+            # 후처리: 외국어 삭제 + 법적 문구 + 길이 제한
             if any('내용' in c for c in df.columns):
                 content_col = [c for c in df.columns if '내용' in c][0] 
                 
                 def final_clean(text):
-                    text = clean_text_force_korean(str(text))
-                    text = text.strip()
-                    # 내용이 너무 길면 자름
-                    if len(text) > 40: text = text[:38] + ".."
+                    # 1. 외국어 박멸
+                    text = clean_text_strict(str(text))
+                    # 2. 길이 확장 (AI가 쓴 내용 그대로 살림, 너무 길면 55자에서 자름)
+                    if len(text) > 55: text = text[:53] + ".."
+                    # 3. 법적 문구
                     return f"(광고) {text}\n*수신거부:설정>변경"
 
                 df[content_col] = df[content_col].apply(final_clean)
+                
+            # 제목도 글자수 맞춤 (너무 짧으면 좀 이상하니까)
+            if any('제목' in c for c in df.columns):
+                title_col = [c for c in df.columns if '제목' in c][0]
+                df[title_col] = df[title_col].apply(lambda x: clean_text_strict(str(x))[:22]) # 22자 컷
             
             status_box.update(label=f"✅ 완료!", state="complete", expanded=False)
             st.subheader("📊 생성된 마케팅 기획안")
