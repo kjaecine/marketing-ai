@@ -18,7 +18,7 @@ st.markdown(f"User Growth를 위한 AI 문구생성기입니다. 🤯좋은 카�
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅ (광고) 및 수신거부 자동 적용됨")
+    st.success("✅AI토큰은 일별 1,500개 한정사용")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
