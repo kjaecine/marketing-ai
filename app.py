@@ -6,32 +6,30 @@ import io
 import json
 
 # --- 🔒 [사용자 고정 설정] ---
-# 아까 주신 키 그대로 사용 (정상 키임이 확인됨)
 FIXED_API_KEY = 'AIzaSyAuZqhGnynPLvbpjjbJC7CDR24LZtzVQO4'.strip() 
 FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Auto-Discovery)")
-st.markdown("구글 서버의 **모델 목록(ListModels)**을 직접 조회하여 404 오류를 해결합니다.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Gemini 1.5 Fixed)")
+st.markdown("안정적인 **Gemini 1.5 Flash** 모델만 골라서 연결합니다.")
 
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    # API 키 상태 표시
     if FIXED_API_KEY:
-        st.success(f"🔑 API Key 적용됨 ({FIXED_API_KEY[:5]}...)")
+        st.success(f"🔑 API Key 적용됨")
     else:
         st.error("API Key가 없습니다.")
         
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID", value="0")
 
-# --- 🔧 핵심 함수: 모델 메뉴판 조회 (ListModels) ---
+# --- 🔧 핵심 함수: 1.5 모델만 콕 집어내기 ---
 
-def get_available_model_name(api_key):
+def get_stable_1_5_model(api_key):
     """
-    구글 서버에 '사용 가능한 모델 목록'을 요청해서
-    가장 적합한 모델의 '정확한 이름'을 가져옵니다.
+    RPD 이슈가 있는 2.5 버전은 거르고,
+    안정적인 1.5 Flash 버전을 목록에서 찾아냅니다.
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     
@@ -39,60 +37,74 @@ def get_available_model_name(api_key):
         response = requests.get(url)
         if response.status_code != 200:
             st.error(f"모델 목록 조회 실패: {response.text}")
-            return None
-            
+            return "gemini-1.5-flash" # 실패 시 기본값 강제
+
         data = response.json()
         if 'models' not in data:
-            st.error("모델 목록이 비어있습니다.")
-            return None
+            return "gemini-1.5-flash"
             
-        # 사용 가능한 모델들 중에서 'generateContent' 기능이 있는 것만 추림
-        candidates = []
-        for m in data['models']:
-            if 'generateContent' in m.get('supportedGenerationMethods', []):
-                candidates.append(m['name']) # 예: models/gemini-1.5-flash-001
+        candidates = [m['name'].replace('models/', '') for m in data['models']]
         
-        # 우선순위에 따라 모델 선택 (Flash -> Pro -> 구형 Pro)
-        # 이름에 'flash'가 포함된 최신 모델 찾기
+        # ★ 핵심 수정: 우선순위 지정 (2.5 절대 배제) ★
+        
+        # 1순위: 1.5 Flash 최신 버전 찾기
         for name in candidates:
-            if '1.5-flash' in name: return name.replace('models/', '')
+            if 'gemini-1.5-flash' in name and 'latest' in name: return name
             
+        # 2순위: 1.5 Flash 특정 버전 (001, 002 등)
         for name in candidates:
-            if 'flash' in name: return name.replace('models/', '')
+            if 'gemini-1.5-flash' in name and '00' in name: return name
             
+        # 3순위: 그냥 1.5 Flash
         for name in candidates:
-            if '1.5-pro' in name: return name.replace('models/', '')
+            if 'gemini-1.5-flash' in name: return name
             
-        # 정 없으면 목록의 첫 번째 거라도 씀
-        if candidates:
-            return candidates[0].replace('models/', '')
+        # 1.5 Flash가 정 없으면 1.5 Pro라도 사용
+        for name in candidates:
+            if 'gemini-1.5-pro' in name: return name
             
-        return "gemini-1.5-flash" # 최후의 수단 (기본값)
+        # 목록에 아무것도 없으면 강제 지정
+        return "gemini-1.5-flash"
         
     except Exception as e:
-        st.error(f"모델 탐색 중 에러: {e}")
+        print(f"탐색 에러: {e}")
         return "gemini-1.5-flash"
 
-def call_gemini_dynamic(api_key, prompt, model_name):
+def call_gemini_direct(api_key, prompt, model_name):
     """
-    위에서 찾은 '정확한 모델 이름'으로 API를 호출합니다.
+    찾아낸 모델로 요청을 보냅니다. (빈 응답 에러 처리 포함)
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     data = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.7}
+        "generationConfig": {
+            "temperature": 0.7
+        }
     }
     
-    response = requests.post(url, headers=headers, json=data, timeout=20)
-    
-    if response.status_code == 200:
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        
+        # 상태 코드 확인
+        if response.status_code != 200:
+            raise Exception(f"API 오류 ({response.status_code}): {response.text}")
+            
         result = response.json()
-        if 'candidates' in result:
-            return result['candidates'][0]['content']['parts'][0]['text']
-    
-    # 실패 시 에러 내용 반환
-    raise Exception(f"모델({model_name}) 호출 실패: {response.text}")
+        
+        # ★ 핵심 수정: list index out of range 방지 ★
+        if 'candidates' in result and len(result['candidates']) > 0:
+            content = result['candidates'][0].get('content')
+            if content and 'parts' in content:
+                return content['parts'][0]['text']
+            else:
+                raise Exception("생성된 텍스트가 비어있습니다. (Safety 필터 등)")
+        else:
+            # candidates가 비어서 오면 보통 Safety 이슈거나 내부 오류
+            raise Exception(f"응답은 왔으나 내용이 없습니다. 결과: {result}")
+            
+    except Exception as e:
+        raise e
 
 # --- (나머지 크롤링/시트 함수는 동일) ---
 def get_sheet_data(sheet_id, gid):
@@ -132,15 +144,15 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
-        # 1. 모델 메뉴판 조회 (핵심!)
-        status_box.write("🛰️ 구글 서버에서 사용 가능한 모델 목록을 조회 중...")
-        best_model = get_available_model_name(FIXED_API_KEY)
+        # 1. 모델 확정 (1.5 우선)
+        status_box.write("🛰️ 안정적인 Gemini 1.5 모델을 찾는 중...")
+        best_model = get_stable_1_5_model(FIXED_API_KEY)
         
-        if not best_model:
-            status_box.update(label="❌ 모델 목록 조회 실패", state="error")
-            st.stop()
-            
-        status_box.write(f"✅ 모델 확정: **{best_model}**")
+        # 혹시라도 2.5가 잡혔는지 재확인 (안전장치)
+        if '2.5' in best_model:
+             best_model = 'gemini-1.5-flash' # 강제 변경
+             
+        status_box.write(f"✅ 사용 모델 확정: **{best_model}**")
         
         # 2. 정보 수집
         status_box.write("🔍 데이터 수집 중...")
@@ -148,11 +160,11 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
         # 3. 생성
-        status_box.write(f"🤖 기획안 작성 중 ({best_model})...")
+        status_box.write(f"🤖 기획안 작성 중...")
         try:
             prompt = f"Role: Copywriter.\nRef: {sheet_data}\nNews: {search_info}\nRequest: {note}\nCreate 5 copies for {keyword}. Output Format: CSV with '|' separator."
             
-            raw_text = call_gemini_dynamic(FIXED_API_KEY, prompt, best_model)
+            raw_text = call_gemini_direct(FIXED_API_KEY, prompt, best_model)
             
             # 후처리
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
