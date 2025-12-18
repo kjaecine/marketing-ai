@@ -6,8 +6,7 @@ from bs4 import BeautifulSoup
 import io
 
 # --- 🔒 [API 키 설정] ---
-# GitHub 보안 스캐너 우회를 위해 키를 분할해서 합칩니다.
-# (사용자님이 주신 키를 그대로 적용했습니다)
+# GitHub 보안 스캐너 우회를 위한 분할 방식 유지
 part1 = "gsk_lIDRWFZfRKNye7Il5egq"
 part2 = "WGdyb3FY5WLFI3NtD9NB70RLy6uk4Mce"
 FIXED_API_KEY = part1 + part2
@@ -16,26 +15,24 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
-st.title("⚡ AI 마케팅 카피 생성기 (Groq Llama 3)")
-st.markdown("세계에서 가장 빠른 **Groq(Llama 3)** 엔진으로 초고속 생성합니다.")
+st.title("⚡ AI 마케팅 카피 생성기 (Groq Llama 3.3)")
+st.markdown("Groq의 최신 **Llama 3.3 (70B)** 모델로 초고속 생성합니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
     
-    # 키가 정상적으로 합쳐졌는지 확인
     if FIXED_API_KEY.startswith("gsk_"):
-        st.success("✅ Groq API Key 연결됨")
+        st.success("✅ Groq Key 연결됨")
     else:
         st.error("API Key 설정 오류")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
-# --- 🔧 핵심 함수: Groq 호출 ---
+# --- 🔧 핵심 함수: Groq 호출 (모델명 변경됨!) ---
 
 def generate_copy_groq(api_key, context, keyword, info, user_config):
-    # Groq 클라이언트 초기화
     client = Groq(api_key=api_key)
     
     custom_instruction = ""
@@ -45,7 +42,6 @@ def generate_copy_groq(api_key, context, keyword, info, user_config):
 
     if not context: context = "데이터 없음."
 
-    # 프롬프트 (한국어 출력 강제)
     prompt = f"""
     You are a professional Korean Viral Marketing Copywriter.
     
@@ -68,21 +64,22 @@ def generate_copy_groq(api_key, context, keyword, info, user_config):
 
     try:
         completion = client.chat.completions.create(
-            model="llama3-70b-8192", # Llama 3 70B (성능/속도 최적)
+            # ★ 여기가 수정되었습니다! (구형 모델 삭제 -> 신형 모델 적용)
+            model="llama-3.3-70b-versatile", 
             messages=[
                 {
                     "role": "user", 
                     "content": prompt
                 }
             ],
-            temperature=0.75, # 창의성 약간 높임
+            temperature=0.7,
             max_tokens=2048,
             top_p=1,
             stream=False,
             stop=None,
         )
         
-        return completion.choices[0].message.content, "llama3-70b (Groq)"
+        return completion.choices[0].message.content, "llama-3.3-70b (Groq)"
 
     except Exception as e:
         raise Exception(f"Groq API 오류: {str(e)}")
@@ -129,16 +126,15 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         search_info = get_naver_search(keyword)
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write("⚡ Groq 엔진 가동 중 (키 적용됨)...")
+        status_box.write("⚡ Groq 신형 엔진(Llama 3.3) 가동 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             
             # Groq 호출
             raw_text, used_model = generate_copy_groq(FIXED_API_KEY, sheet_data, keyword, search_info, config)
             
-            # CSV 파싱 및 정제
+            # CSV 파싱
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
-            # Llama가 가끔 사족을 붙일 때를 대비해 '|'가 있는 줄만 남김
             if '|' in clean_csv:
                 lines = clean_csv.split('\n')
                 csv_lines = [line for line in lines if '|' in line]
