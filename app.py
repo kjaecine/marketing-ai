@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from google import genai
+import google.generativeai as genai
 import requests
 from bs4 import BeautifulSoup
 import io
@@ -8,7 +8,7 @@ import io
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
 
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (With Naver Search)")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Stable Version)")
 st.markdown("구글 시트의 **톤앤매너**를 학습하고, **네이버 최신 뉴스**를 반영하여 기획안을 작성합니다.")
 
 # --- 👈 사이드바: 설정 구간 ---
@@ -23,11 +23,9 @@ with st.sidebar:
 
 # --- 🔧 핵심 함수들 ---
 
-def get_valid_model(api_key):
-    """모델 자동 탐색"""
-    client = genai.Client(api_key=api_key)
-    # 복잡한 로직 없이 가장 안정적인 최신 모델 지정
-    return "gemini-1.5-flash"
+def configure_genai(api_key):
+    """API 키 설정 및 모델 준비"""
+    genai.configure(api_key=api_key)
 
 def get_sheet_data(sheet_id, gid):
     """구글 시트 데이터 가져오기 (최신 30개)"""
@@ -59,8 +57,14 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    """기획안 생성"""
-    client = genai.Client(api_key=api_key)
+    """기획안 생성 (안정적인 google-generativeai 라이브러리 사용)"""
+    configure_genai(api_key)
+    
+    # 모델 이름 자동 선택 (에러 방지)
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except:
+        model = genai.GenerativeModel('gemini-pro')
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -92,10 +96,7 @@ def generate_plan(api_key, context, keyword, info, user_config):
     (Include header, Use '|' separator)
     """
     
-    response = client.models.generate_content(
-        model="gemini-1.5-flash",
-        contents=prompt
-    )
+    response = model.generate_content(prompt)
     return response.text
 
 # --- 🖥️ 메인 화면 UI ---
@@ -125,7 +126,6 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         # 1. 정보 수집
         status_box.write("🔍 네이버 뉴스 검색 중...")
         search_info = get_naver_search(keyword)
-        st.caption(f"수집된 정보: {search_info[:50]}...")
         
         # 2. 시트 읽기
         status_box.write("📚 구글 시트 학습 중...")
