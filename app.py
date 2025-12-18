@@ -137,3 +137,18 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
             # 후처리
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
+            
+            # 법적 문구 추가
+            content_col = [c for c in df.columns if '내용' in c][0] 
+            df[content_col] = df[content_col].apply(lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경")
+            
+            status_box.update(label=f"✅ 성공! (연결된 모델: {used_model})", state="complete", expanded=False)
+            st.subheader("📊 결과")
+            st.dataframe(df)
+            
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 엑셀 다운로드", csv, f"{keyword}_plan.csv", "text/csv")
+            
+        except Exception as e:
+            status_box.update(label="❌ 모든 시도 실패", state="error")
+            st.error(f"최종 에러 내용:\n{e}")
