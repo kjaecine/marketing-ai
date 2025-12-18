@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
-from google import genai
-from google.genai import types
 import requests
 from bs4 import BeautifulSoup
 import io
+import json
 
 # --- 🔒 [사용자 고정 설정] ---
 FIXED_API_KEY = 'AIzaSyCDtgjMmzUIbXGOIzZsYz-s0X1NTjqrUPo' 
@@ -13,49 +12,70 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Diagnosis Mode)")
-st.markdown("서버와 통신 가능한 **최적의 모델 이름을 자동으로 찾아** 실행합니다.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Direct API)")
+st.markdown("라이브러리 없이 **Google API를 직접 호출**하여 오류를 원천 차단합니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
+    st.success("✅ Direct API Mode 가동")
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
-# --- 🔧 핵심 함수들 ---
+# --- 🔧 핵심 함수들 (NO SDK) ---
 
-def find_working_model(client):
+def call_gemini_raw(api_key, prompt):
     """
-    404 에러를 방지하기 위해 사용 가능한 모델 이름을 직접 테스트하여 찾습니다.
+    라이브러리를 쓰지 않고 HTTP 요청을 직접 보냅니다.
+    될 때까지 모델을 바꿔가며 시도합니다.
     """
-    # 테스트할 모델 이름 후보군 (우선순위 순)
-    candidates = [
+    # 시도할 모델 목록 (우선순위 순)
+    models_to_try = [
         "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
         "gemini-1.5-flash-001",
-        "gemini-1.5-flash-002",
         "gemini-1.5-pro",
-        "gemini-1.5-pro-001",
-        "gemini-2.0-flash-exp" # 최신 실험버전
+        "gemini-pro",
+        "gemini-1.0-pro"
     ]
-    
-    print("🔍 모델 연결 테스트 시작...")
-    
-    for model_name in candidates:
-        try:
-            # 아주 가벼운 테스트 요청을 보내봄
-            client.models.generate_content(
-                model=model_name,
-                contents="Test",
-                config=types.GenerateContentConfig(max_output_tokens=1)
-            )
-            print(f"✅ 연결 성공: {model_name}")
-            return model_name # 성공하면 이 이름 반환
-        except Exception as e:
-            print(f"❌ 실패 ({model_name}): {e}")
-            continue # 실패하면 다음 후보로
 
-    # 다 실패하면 기본값 반환 (어차피 에러 나겠지만 로그 확인용)
-    return "gemini-1.5-flash"
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        headers = {'Content-Type': 'application/json'}
+        data = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 2000
+            }
+        }
+        
+        try:
+            # 직접 POST 요청 전송
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            
+            # 200 OK가 아니면 다음 모델로 넘어감
+            if response.status_code != 200:
+                print(f"⚠️ {model} 실패: {response.status_code}")
+                continue
+                
+            result = response.json()
+            
+            # 응답 파싱
+            if 'candidates' in result and result['candidates']:
+                text = result['candidates'][0]['content']['parts'][0]['text']
+                return text, model # 성공한 텍스트와 모델명 반환
+            else:
+                continue # 응답은 왔는데 내용이 없으면 다음으로
+                
+        except Exception as e:
+            print(f"❌ {model} 연결 오류: {e}")
+            continue
+
+    # 모든 모델이 실패했을 경우
+    raise Exception("모든 모델 연결에 실패했습니다. API 키를 확인해주세요.")
 
 def get_sheet_data(sheet_id, gid):
     try:
@@ -78,9 +98,7 @@ def get_naver_search(keyword):
     except:
         return "크롤링 차단됨 (기본 정보로 진행)"
 
-def generate_plan(api_key, context, keyword, info, user_config, valid_model_name):
-    client = genai.Client(api_key=api_key)
-    
+def generate_plan_logic(api_key, context, keyword, info, user_config):
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
     if user_config['campaign']: custom_instruction += f"- 캠페인: {user_config['campaign']}\n"
@@ -95,7 +113,7 @@ def generate_plan(api_key, context, keyword, info, user_config, valid_model_name
     1. **STYLE CLONING:** Mimic the Emoji Usage and Tone from [Reference].
     2. Create 10 marketing messages for '{keyword}'.
     3. **STRICT LIMITS:**
-       - **Title:** UNDER 22 Korean characters.
+       - **Title:** UNDER 20 Korean characters.
        - **Body:** UNDER 60 Korean characters.
     4. Apply [User Request].
 
@@ -113,12 +131,8 @@ def generate_plan(api_key, context, keyword, info, user_config, valid_model_name
     (CSV format with '|' separator, Header included)
     """
 
-    # 검증된 모델 이름으로 호출
-    response = client.models.generate_content(
-        model=valid_model_name,
-        contents=prompt
-    )
-    return response.text
+    # ★ 여기서 직접 호출 함수 사용 ★
+    return call_gemini_raw(api_key, prompt)
 
 # --- 🖥️ 메인 화면 UI ---
 
@@ -140,27 +154,18 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
-        # 1. 모델 진단 (가장 먼저 수행)
-        status_box.write("🛰️ 사용 가능한 AI 모델을 스캔 중...")
-        try:
-            temp_client = genai.Client(api_key=FIXED_API_KEY)
-            valid_model = find_working_model(temp_client)
-            status_box.write(f"✅ 연결 성공! 사용 모델: **{valid_model}**")
-        except Exception as e:
-            status_box.update(label="❌ API 키 또는 네트워크 오류", state="error")
-            st.error(f"초기 연결 실패: {e}")
-            st.stop()
-        
-        # 2. 크롤링 및 시트 읽기
+        # 1. 정보 수집
         status_box.write("🔍 네이버 뉴스 & 시트 데이터 수집 중...")
         search_info = get_naver_search(keyword)
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        # 3. 생성
-        status_box.write(f"🤖 기획안 작성 중...")
+        # 2. 생성 (직접 호출)
+        status_box.write(f"🤖 AI 모델 연결 시도 중 (Direct API)...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
-            raw_text = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config, valid_model)
+            
+            # 여기서 직접 호출 함수가 실행됨
+            raw_text, used_model = generate_plan_logic(FIXED_API_KEY, sheet_data, keyword, search_info, config)
             
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
@@ -171,7 +176,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
                 lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경"
             )
             
-            status_box.update(label=f"✅ 완료! (모델: {valid_model})", state="complete", expanded=False)
+            status_box.update(label=f"✅ 완료! (성공 모델: {used_model})", state="complete", expanded=False)
             
             st.subheader("📊 생성된 마케팅 기획안")
             st.dataframe(df, use_container_width=True)
@@ -181,4 +186,4 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
             
         except Exception as e:
             status_box.update(label="❌ 오류", state="error")
-            st.error(f"에러: {e}")
+            st.error(f"상세 에러 내용: {e}")
