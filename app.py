@@ -5,39 +5,44 @@ import requests
 from bs4 import BeautifulSoup
 import io
 
-# --- 🔒 [보안 설정 변경] ---
-# GitHub 에러 방지를 위해, 코드가 아닌 'Streamlit Secrets'에서 키를 가져옵니다.
-try:
-    FIXED_API_KEY = st.secrets["GROQ_API_KEY"]
-except FileNotFoundError:
-    # 로컬 테스트용 (혹시 secrets 파일이 없을 때 대비)
-    st.error("⚠️ API 키를 찾을 수 없습니다. Streamlit 대시보드 > Settings > Secrets에 'GROQ_API_KEY'를 설정해주세요.")
-    st.stop()
-
-FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
-# -------------------------
-
+# --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
 st.title("⚡ AI 마케팅 카피 생성기 (Groq Llama 3)")
 st.markdown("세계에서 가장 빠른 **Groq(Llama 3)** 엔진으로 초고속 생성합니다.")
 
+# --- 🔒 [API 키 처리 로직] (핵심 수정) ---
+# 1. 비밀 금고(Secrets)를 먼저 뒤져봅니다.
+# 2. 없으면(에러나면) 사이드바에서 입력받습니다.
+
+api_key = None
+
+try:
+    # Streamlit Secrets에서 조회 시도
+    if "GROQ_API_KEY" in st.secrets:
+        api_key = st.secrets["GROQ_API_KEY"]
+except FileNotFoundError:
+    pass # 로컬 환경 등에서 secrets 파일 자체가 없을 때 무시
+
+# --- 👈 사이드바 ---
 with st.sidebar:
-    st.header("⚙️ 설정 확인")
-    # 키가 로드되었는지 확인 (보안상 앞 4자리만 표시)
-    if FIXED_API_KEY.startswith("gsk_"):
-        masked_key = FIXED_API_KEY[:4] + "..."
-        st.success(f"✅ Groq 키 연결됨 ({masked_key})")
-    else:
-        st.error("API 키 설정 오류")
+    st.header("⚙️ 설정")
     
-    sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
-    sheet_gid_input = st.text_input("시트 GID", value="0")
+    # Secrets에 키가 없으면 입력창을 띄움
+    if not api_key:
+        api_key = st.text_input("🔑 Groq API Key 입력", type="password", placeholder="gsk_로 시작하는 키")
+        if not api_key:
+            st.warning("API 키를 입력하거나 Secrets에 설정해주세요.")
+    else:
+        # Secrets에서 잘 가져왔으면 성공 표시
+        st.success("✅ API Key 연동됨 (Secrets)")
+    
+    sheet_id_input = st.text_input("구글 시트 ID", value='1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw')
+    sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
-# --- 🔧 핵심 함수: Groq 호출 ---
+# --- 🔧 핵심 함수 ---
 
-def generate_copy_groq(api_key, context, keyword, info, user_config):
-    # Groq 클라이언트 초기화
-    client = Groq(api_key=api_key)
+def generate_copy_groq(key, context, keyword, info, user_config):
+    client = Groq(api_key=key)
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -46,7 +51,6 @@ def generate_copy_groq(api_key, context, keyword, info, user_config):
 
     if not context: context = "데이터 없음."
 
-    # 프롬프트 구성 (한국어 강제)
     prompt = f"""
     You are a professional Korean Viral Marketing Copywriter.
     
@@ -69,26 +73,20 @@ def generate_copy_groq(api_key, context, keyword, info, user_config):
 
     try:
         completion = client.chat.completions.create(
-            model="llama3-70b-8192", # Llama 3 70B (성능/속도 최적)
-            messages=[
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ],
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=2048,
             top_p=1,
             stream=False,
             stop=None,
         )
-        
         return completion.choices[0].message.content, "llama3-70b (Groq)"
 
     except Exception as e:
         raise Exception(f"Groq API 오류: {str(e)}")
 
-# --- (정보 수집 함수 동일) ---
+# --- (정보 수집 함수들) ---
 def get_sheet_data(sheet_id, gid):
     try:
         url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
@@ -121,7 +119,9 @@ with col4:
     note = st.text_input("📝 요청사항", placeholder="예: 이모지 많이")
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
-    if not keyword:
+    if not api_key:
+        st.error("🚫 API 키가 없습니다. 사이드바에 Groq API 키를 입력해주세요.")
+    elif not keyword:
         st.warning("주제를 입력해주세요.")
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
@@ -130,14 +130,13 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         search_info = get_naver_search(keyword)
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write("⚡ Groq 엔진 가동 중 (Secret Key 사용)...")
+        status_box.write("⚡ Groq 엔진 가동 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             
-            # Groq 호출
-            raw_text, used_model = generate_copy_groq(FIXED_API_KEY, sheet_data, keyword, search_info, config)
+            # API 키 전달
+            raw_text, used_model = generate_copy_groq(api_key, sheet_data, keyword, search_info, config)
             
-            # CSV 파싱
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             if '|' in clean_csv:
                 lines = clean_csv.split('\n')
@@ -146,7 +145,6 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
 
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
             
-            # 법적 문구 추가
             if any('내용' in c for c in df.columns):
                 content_col = [c for c in df.columns if '내용' in c][0] 
                 df[content_col] = df[content_col].apply(lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경")
