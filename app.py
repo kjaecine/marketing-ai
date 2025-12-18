@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 import io
 import re
 import csv
-import random # 스마트 샘플링을 위해 추가
+import random
 
 # --- 🔒 [API 키 설정] ---
 part1 = "gsk_lIDRWFZfRKNye7Il5egq"
@@ -16,8 +16,8 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
-st.title("⚡ AI 마케팅 카피 생성기 (Smart Sampling)")
-st.markdown("토큰 한도 최적화: 최신 300개 중 **핵심 60개 랜덤 학습** + 공백 제외 62자 타겟팅")
+st.title("⚡ AI 마케팅 카피 생성기 (Title Fix)")
+st.markdown("제목 품질 강화(단답형 금지) + 공백 제외 62자 본문 + 최적화 학습")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
@@ -63,13 +63,9 @@ def get_raw_sheet_text(sheet_id, gid):
         if len(all_rows) < 2: return "데이터 없음"
         
         learned_data = []
-        
-        # [핵심 수정] 토큰 폭발 방지 로직
-        # 1. 일단 최신 300개를 가져옵니다. (트렌드 반영)
         recent_rows = all_rows[1:][-300:]
         
-        # 2. 300개는 너무 많으니(2만 토큰), 여기서 '랜덤으로 60개'만 뽑습니다.
-        # 60개면 약 4,000~5,000 토큰으로 안전권입니다.
+        # 300개 중 60개 랜덤 추출 (토큰 최적화)
         if len(recent_rows) > 60:
             target_rows = random.sample(recent_rows, 60)
         else:
@@ -78,7 +74,6 @@ def get_raw_sheet_text(sheet_id, gid):
         for row in target_rows:
             clean_row = [cell.strip() for cell in row if cell.strip()]
             if len(clean_row) >= 2:
-                # 너무 짧은 건 학습 가치 없으니 제외
                 if len("".join(clean_row)) > 15:
                     row_str = " | ".join(clean_row)
                     learned_data.append(row_str)
@@ -87,7 +82,7 @@ def get_raw_sheet_text(sheet_id, gid):
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- 🔧 핵심 함수: Groq 호출 ---
+# --- 🔧 핵심 함수: Groq 호출 (제목 프롬프트 대수술) ---
 def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     client = Groq(api_key=api_key)
     
@@ -95,34 +90,35 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
     if user_config['note']: custom_instruction += f"- 요청사항: {user_config['note']}\n"
 
-    # 공백 제외 45~48자 타겟팅
-    
     prompt = f"""
     Role: You are a Professional Viral Marketing Copywriter (Target: Korea).
     
     [YOUR MISSION]
     Create 10 marketing messages for '{keyword}'.
     
-    [STRICT TITLE FORMAT]
-    **[Emoji] <{keyword}> [Trend Phrase]**
-    - Include <{keyword}>.
-    - Total length must be UNDER 22 characters (including spaces).
+    [TITLE RULES - VERY IMPORTANT]
+    Format: **[Emoji] <{keyword}> [Catchy Phrase]**
+    1. **NO Single Words:** NEVER write titles like "<{keyword}> 남자", "<{keyword}> 법률", "<{keyword}> 추천".
+    2. **Use Details:** You MUST use the [Trend Info] or specific details in the title. (e.g., Actor's name, 'Released Today', 'Shocking Twist').
+    3. **Bad Examples (DON'T DO THIS):**
+       - 👮 <프로보노> 법정물 (Too simple)
+       - 📺 <프로보노> 남자 (Boring)
+       - 🔥 <환승연애> 연애 (Meaningless)
+    4. **Good Examples (DO THIS):**
+       - 👮 <프로보노> 정경호가 돌아왔다!
+       - 🍎 <프로보노> 속물 변호사의 반란
+       - 💘 <환승연애> X와 재회하는 날
+    5. **Length:** Keep the total length under 22 characters.
     
-    [CONTENT TONE & STYLE]
-    1. **Tone:** Casual (Banmal) or Noun-ending. 
-    2. **PROHIBITED:** NO 'ㅋㅋ', 'ㅠㅠ', 'ㅎㅎ', 'ㄷㄷ'. NO foreign languages.
-    3. **Emoji:** Use 1-2 appropriate emojis.
-    4. **Mimic:** Learn patterns from [User's Past Data].
+    [CONTENT RULES]
+    1. **Tone:** Casual (Banmal) or Noun-ending. NO 'ㅋㅋ', 'ㅠㅠ'.
+    2. **Length (Excluding Spaces):** Write exactly **45~48 characters** (excluding spaces).
+    3. **Mimic:** Learn patterns from [User's Past Data].
     
-    [LENGTH CONSTRAINT - EXCLUDING SPACES]
-    - **Body Text:** Write a message where the character count **(EXCLUDING SPACES)** is exactly **45 to 48 characters**.
-    - This corresponds to roughly 60~65 characters including spaces.
-    - **Do NOT be too short.** Make sure the "non-space character count" reaches at least 45.
-    
-    [User's Past Data (Sampled Patterns)]
+    [User's Past Data (Sampled)]
     {context_raw}
     
-    [Trend Info]
+    [Trend Info (Use this for Titles)]
     {info}
 
     [User Request]
@@ -140,7 +136,7 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.75, 
+            temperature=0.8, # 창의성을 위해 0.8로 약간 상향
             max_tokens=3000,
             top_p=1,
             stream=False,
@@ -162,21 +158,22 @@ def get_naver_search(keyword):
         for item in soup.select(".news_area")[:3]:
             title = item.select_one('.news_tit').get_text()
             desc = item.select_one('.news_dsc').get_text()
-            news.append(f"- {title}: {desc}")
+            # AI에게 더 많은 재료를 주기 위해 제목+요약 함께 전달
+            news.append(f"- {title} ({desc})") 
         return "\n".join(news) if news else ""
     except: return ""
 
 # --- 실행부 ---
 col1, col2 = st.columns([2, 1])
 with col1:
-    keyword = st.text_input("📢 홍보할 주제", placeholder="예: 환승연애4")
+    keyword = st.text_input("📢 홍보할 주제", placeholder="예: 프로보노")
 with col2:
     campaign = st.text_input("🔖 캠페인명", placeholder="예: 런칭알림")
 col3, col4 = st.columns([1, 1])
 with col3:
     target = st.text_input("🎯 타겟 설정", placeholder="예: 2030 여성")
 with col4:
-    note = st.text_input("📝 요청사항", placeholder="예: 깔끔한 반말, 임팩트 있게")
+    note = st.text_input("📝 요청사항", placeholder="예: 호기심 자극")
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
     if not keyword:
@@ -184,12 +181,11 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
-        # [수정됨] 사용자에게 샘플링 사실 알림
-        status_box.write(f"🔍 시트 데이터 최신 300개 중 60개 샘플링 학습...")
+        status_box.write(f"🔍 시트 데이터 샘플링 & 뉴스 분석 중...")
         search_info = get_naver_search(keyword)
         context_raw = get_raw_sheet_text(sheet_id_input, sheet_gid_input)
         
-        status_box.write("⚡ Groq 엔진 가동 (토큰 최적화 모드)...")
+        status_box.write("⚡ Groq 엔진 가동 (제목 퀄리티 UP)...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             
@@ -225,6 +221,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
                 df['내용'] = df['내용'].apply(clean_and_format_legal_text)
             
             if '제목' in df.columns:
+                # 22자 제한은 유지하되, 내용이 알차게 들어오도록
                 df['제목'] = df['제목'].apply(lambda x: str(x).strip()[:22])
 
             status_box.update(label=f"✅ 완료!", state="complete", expanded=False)
