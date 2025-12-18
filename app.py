@@ -12,30 +12,18 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기(User Growth)")
-st.markdown(f"User Growth를 위한 AI 문구생성기입니다. 🤯좋은 카피가 안나온다면 필요내용을 요청사항에 넣어주세요.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Limit Free Ver)")
+st.markdown(f"**[하루 1,500회 무료 모델(1.5-flash) 고정]** + **[법적 문구 자동 삽입]** 버전입니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅AI토큰은 일별 1,500개 한정사용")
+    st.success("✅ 1.5 Flash 모델 고정됨 (RPD 1500)")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
 # --- 🔧 핵심 함수들 ---
-
-def get_available_model(api_key):
-    """모델 자동 탐색"""
-    genai.configure(api_key=api_key)
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if 'flash' in m.name: return m.name
-                if 'pro' in m.name: return m.name
-        return 'models/gemini-pro'
-    except:
-        return 'models/gemini-pro'
 
 def get_sheet_data(sheet_id, gid):
     """구글 시트 데이터 가져오기 (인코딩 강화)"""
@@ -62,7 +50,8 @@ def get_naver_search(keyword):
 
 def generate_plan(api_key, context, keyword, info, user_config):
     """기획안 생성"""
-    model_name = get_available_model(api_key)
+    # ★ 핵심 수정: 모델 자동 탐색 제거하고 1.5-flash로 강제 고정 ★
+    model_name = 'gemini-1.5-flash' 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name)
     
@@ -73,16 +62,15 @@ def generate_plan(api_key, context, keyword, info, user_config):
 
     if not context: context = "데이터 없음."
 
-    # ★ 글자수 제한: (광고)랑 수신거부 문구 들어갈 자리 빼고 40자로 줄임
     prompt = f"""
     Role: Viral Marketing Copywriter.
     
     [Mission]
     1. **STYLE CLONING:** Mimic the Emoji Usage and Tone from [Reference].
     2. Create 10 marketing messages for '{keyword}'.
-    3. **STRICT LIMITS (CRITICAL):**
-       - **Title:** UNDER 25 Korean characters.
-       - **Body:** UNDER 60 Korean characters (Short & Punchy).
+    3. **STRICT LIMITS:**
+       - **Title:** UNDER 20 Korean characters.
+       - **Body:** UNDER 40 Korean characters.
     4. Apply [User Request].
 
     [Reference]
@@ -127,31 +115,10 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         status_box.write("📚 구글 시트 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write("🤖 AI 생성 및 법적 문구 적용 중...")
+        status_box.write(f"🤖 AI(1.5-Flash)가 작성 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
             
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
-            df = pd.read_csv(io.StringIO(clean_csv), sep='|')
-            
-            # ★ 핵심 수정: 법적 문구 강제 삽입 구간 ★
-            # 데이터프레임의 '내용' 컬럼을 찾아서 앞뒤에 문구 붙이기
-            content_col = [c for c in df.columns if '내용' in c][0] # '내용'이 포함된 컬럼 찾기
-            
-            # (광고) + 본문 + 수신거부 결합
-            df[content_col] = df[content_col].apply(
-                lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경"
-            )
-            
-            status_box.update(label=f"✅ 완료! (모델: {used_model})", state="complete", expanded=False)
-            
-            st.subheader("📊 생성된 마케팅 기획안")
-            st.dataframe(df, use_container_width=True)
-            
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 엑셀 다운로드", csv, f"{keyword}_plan.csv", "text/csv")
-            
-        except Exception as e:
-            status_box.update(label="❌ 오류", state="error")
-            st.error(f"에러: {e}")
+            df = pd.read_csv(io.StringIO(clean
