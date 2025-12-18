@@ -5,78 +5,66 @@ import requests
 from bs4 import BeautifulSoup
 import io
 
+# --- 🔒 [사용자 고정 설정] ---
+# 여기에 API 키를 박아두면 매번 입력할 필요가 없습니다.
+FIXED_API_KEY = 'AIzaSyCDtgjMmzUIbXGOIzZsYz-s0X1NTjqrUPo' 
+FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
+# -------------------------
+
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Pro Version)")
+st.markdown(f"**[제목 20자 / 내용 60자]** 제한에 맞춰 최적화된 문구를 생성합니다.")
 
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Auto-Detect Model)")
-st.markdown("구글 시트의 **톤앤매너**를 학습하고, **네이버 최신 뉴스**를 반영하여 기획안을 작성합니다.")
-
-# --- 👈 사이드바: 설정 구간 ---
+# --- 👈 사이드바: 설정 (API 키 입력창 제거됨) ---
 with st.sidebar:
-    st.header("⚙️ 기본 설정")
-    GEMINI_API_KEY = st.text_input("Gemini API Key", type="password", help="Google AI Studio에서 발급받은 키를 입력하세요.")
-    SPREADSHEET_ID = st.text_input("구글 시트 ID", value="1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw")
-    SHEET_GID = st.text_input("시트 GID (보통 0)", value="0")
+    st.header("⚙️ 설정 확인")
+    st.success("✅ API 키가 코드에 고정되었습니다.")
     
-    st.divider()
-    st.info("💡 API 키는 저장되지 않으며 새로고침 시 초기화됩니다.")
+    # 시트 ID는 혹시 바꿀 수도 있으니 입력창 남겨둠 (기본값은 고정)
+    sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
+    sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0", help="주소창 맨 끝 #gid=숫자 확인")
 
 # --- 🔧 핵심 함수들 ---
 
 def get_available_model(api_key):
-    """
-    내 API 키로 사용 가능한 모델을 자동으로 찾아냅니다. (404 에러 방지)
-    """
+    """모델 자동 탐색 (404 방지)"""
     genai.configure(api_key=api_key)
     try:
-        # 사용 가능한 모델 목록을 조회
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                # 1순위: Flash 모델 (빠름)
                 if 'flash' in m.name: return m.name
-                # 2순위: Pro 모델 (성능 좋음)
                 if 'pro' in m.name: return m.name
-        # 목록 조회는 됐는데 딱히 못 찾았으면 기본값
         return 'models/gemini-pro'
     except:
-        # 목록 조회조차 실패하면 가장 기본 모델 반환
         return 'models/gemini-pro'
 
 def get_sheet_data(sheet_id, gid):
-    """구글 시트 데이터 가져오기 (최신 30개)"""
+    """구글 시트 데이터 가져오기"""
     try:
         url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
         df = pd.read_csv(url, on_bad_lines='skip')
         if df.empty: return None
         if len(df) > 30: df = df.tail(30)
         return df.to_markdown(index=False)
-    except Exception as e:
+    except:
         return None
 
 def get_naver_search(keyword):
     """네이버 뉴스 크롤링"""
     try:
         url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sm=tab_opt&sort=1"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        news_list = []
-        for item in soup.select(".news_area")[:5]:
-            title = item.select_one(".news_tit").get_text()
-            desc = item.select_one(".news_dsc").get_text()
-            news_list.append(f"[{title}]: {desc}")
-            
-        return "\n".join(news_list) if news_list else "검색 결과 없음"
+        news = [f"[{item.select_one('.news_tit').get_text()}]: {item.select_one('.news_dsc').get_text()}" for item in soup.select(".news_area")[:5]]
+        return "\n".join(news) if news else "검색 결과 없음"
     except:
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    """기획안 생성"""
-    # 1. 모델 자동 탐색 (여기가 핵심!)
+    """기획안 생성 (글자수 제한 적용)"""
     model_name = get_available_model(api_key)
-    
-    # 2. 모델 설정
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name)
     
@@ -87,14 +75,17 @@ def generate_plan(api_key, context, keyword, info, user_config):
 
     if not context: context = "데이터 없음. 일반적인 마케팅 톤 사용."
 
+    # ★ 글자수 제한 프롬프트 강화 ★
     prompt = f"""
-    Role: Marketing Expert.
+    Role: Senior Copywriter.
     
     [Mission]
-    1. Learn style from [Reference].
+    1. Analyze style from [Reference].
     2. Create 10 marketing messages for '{keyword}' based on [News].
-    3. Apply [User Request] strictly.
-    4. Output MUST be a CSV format with '|' separator.
+    3. **STRICTLY FOLLOW CHARACTER LIMITS:**
+       - **Title:** UNDER 20 Korean characters (Short & Impactful).
+       - **Body:** UNDER 60 Korean characters (Concise).
+    4. Apply [User Request].
 
     [Reference]
     {context}
@@ -106,8 +97,8 @@ def generate_plan(api_key, context, keyword, info, user_config):
     {custom_instruction}
 
     [Output Format]
-    대분류|캠페인|상세타겟_상세타깃_상세설명|추천 콘텐츠|제목|내용
-    (Include header, Use '|' separator)
+    대분류|캠페인|상세타겟_상세타깃_상세설명|추천 콘텐츠|제목(20자이내)|내용(60자이내)
+    (CSV format with '|' separator, Header included)
     """
     
     response = model.generate_content(prompt)
@@ -116,61 +107,44 @@ def generate_plan(api_key, context, keyword, info, user_config):
 # --- 🖥️ 메인 화면 UI ---
 
 col1, col2 = st.columns([2, 1])
-
 with col1:
-    keyword = st.text_input("📢 홍보할 주제 (키워드)", placeholder="예: 환승연애4, 갤럭시S24")
-
+    keyword = st.text_input("📢 홍보할 주제", placeholder="예: 환승연애4")
 with col2:
-    campaign = st.text_input("🔖 캠페인명 (선택)", placeholder="예: 런칭알림")
+    campaign = st.text_input("🔖 캠페인명", placeholder="예: 런칭알림")
 
 col3, col4 = st.columns([1, 1])
 with col3:
-    target = st.text_input("🎯 타겟 설정 (선택)", placeholder="예: 30대 직장인")
+    target = st.text_input("🎯 타겟 설정", placeholder="예: 30대 직장인")
 with col4:
-    note = st.text_input("📝 특이사항/요청 (선택)", placeholder="예: 도파민 강조해줘")
+    note = st.text_input("📝 요청사항", placeholder="예: 도파민 강조")
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
-    if not GEMINI_API_KEY:
-        st.error("좌측 사이드바에 API 키를 입력해주세요!")
-    elif not keyword:
-        st.warning("홍보할 주제를 입력해주세요.")
+    if not keyword:
+        st.warning("주제를 입력해주세요.")
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
-        
-        # 1. 정보 수집
         status_box.write("🔍 네이버 뉴스 검색 중...")
         search_info = get_naver_search(keyword)
         
-        # 2. 시트 읽기
-        status_box.write("📚 구글 시트 학습 중...")
-        sheet_data = get_sheet_data(SPREADSHEET_ID, SHEET_GID)
+        status_box.write("📚 구글 시트 & 모델 로딩 중...")
+        sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        # 3. 생성
-        status_box.write("🤖 모델을 찾고 기획안을 작성 중...")
+        status_box.write("🤖 글자 수 맞춰서 작성 중...")
         try:
-            user_config = {"campaign": campaign, "target": target, "note": note}
+            config = {"campaign": campaign, "target": target, "note": note}
+            raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
             
-            # 생성 함수 호출
-            raw_text, used_model = generate_plan(GEMINI_API_KEY, sheet_data, keyword, search_info, user_config)
-            
-            # 4. 결과 변환
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
             
-            status_box.update(label=f"✅ 생성 완료! (사용 모델: {used_model})", state="complete", expanded=False)
+            status_box.update(label=f"✅ 완료! (모델: {used_model})", state="complete", expanded=False)
             
             st.subheader("📊 생성된 마케팅 기획안")
-            st.data_editor(df, num_rows="dynamic", use_container_width=True)
+            st.dataframe(df, use_container_width=True)
             
-            # CSV 다운로드 버튼
             csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📥 엑셀(CSV)로 다운로드",
-                data=csv,
-                file_name=f"{keyword}_marketing_plan.csv",
-                mime="text/csv",
-            )
+            st.download_button("📥 엑셀 다운로드", csv, f"{keyword}_plan.csv", "text/csv")
             
         except Exception as e:
-            status_box.update(label="❌ 오류 발생", state="error")
-            st.error(f"에러 내용: {e}")
+            status_box.update(label="❌ 오류", state="error")
+            st.error(f"에러: {e}")
