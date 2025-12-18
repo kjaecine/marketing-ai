@@ -81,8 +81,8 @@ def generate_plan(api_key, context, keyword, info, user_config):
     1. **STYLE CLONING:** Mimic the Emoji Usage and Tone from [Reference].
     2. Create 10 marketing messages for '{keyword}'.
     3. **STRICT LIMITS (CRITICAL):**
-       - **Title:** UNDER 20 Korean characters.
-       - **Body:** UNDER 40 Korean characters (Short & Punchy).
+       - **Title:** UNDER 22 Korean characters.
+       - **Body:** UNDER 53 Korean characters (Short & Punchy).
     4. Apply [User Request].
 
     [Reference]
