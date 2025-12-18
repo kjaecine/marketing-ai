@@ -3,3 +3,4 @@ pandas
 google-generativeai
 requests
 beautifulsoup4
+duckduckgo-search
