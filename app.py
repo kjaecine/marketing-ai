@@ -6,29 +6,27 @@ from bs4 import BeautifulSoup
 import io
 
 # --- 🔒 [사용자 고정 설정] ---
-# 여기에 API 키를 박아두면 매번 입력할 필요가 없습니다.
 FIXED_API_KEY = 'AIzaSyCDtgjMmzUIbXGOIzZsYz-s0X1NTjqrUPo' 
 FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Pro Version)")
-st.markdown(f"**[제목 20자 / 내용 60자]** 제한에 맞춰 최적화된 문구를 생성합니다.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Emoji Enhanced)")
+st.markdown(f"**[제목 20자 / 내용 60자]** + **[이모지 말투 완벽 흡수]** 버전입니다.")
 
-# --- 👈 사이드바: 설정 (API 키 입력창 제거됨) ---
+# --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅ API 키가 코드에 고정되었습니다.")
+    st.success("✅ API 키 & 이모지 학습 모드 적용됨")
     
-    # 시트 ID는 혹시 바꿀 수도 있으니 입력창 남겨둠 (기본값은 고정)
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
-    sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0", help="주소창 맨 끝 #gid=숫자 확인")
+    sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
 # --- 🔧 핵심 함수들 ---
 
 def get_available_model(api_key):
-    """모델 자동 탐색 (404 방지)"""
+    """모델 자동 탐색"""
     genai.configure(api_key=api_key)
     try:
         for m in genai.list_models():
@@ -40,10 +38,11 @@ def get_available_model(api_key):
         return 'models/gemini-pro'
 
 def get_sheet_data(sheet_id, gid):
-    """구글 시트 데이터 가져오기"""
+    """구글 시트 데이터 가져오기 (인코딩 강화)"""
     try:
         url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
-        df = pd.read_csv(url, on_bad_lines='skip')
+        # encoding='utf-8' 추가하여 이모지 깨짐 방지
+        df = pd.read_csv(url, encoding='utf-8', on_bad_lines='skip')
         if df.empty: return None
         if len(df) > 30: df = df.tail(30)
         return df.to_markdown(index=False)
@@ -63,7 +62,7 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    """기획안 생성 (글자수 제한 적용)"""
+    """기획안 생성 (이모지 학습 강화)"""
     model_name = get_available_model(api_key)
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name)
@@ -73,21 +72,24 @@ def generate_plan(api_key, context, keyword, info, user_config):
     if user_config['campaign']: custom_instruction += f"- 캠페인: {user_config['campaign']}\n"
     if user_config['note']: custom_instruction += f"- 요청사항: {user_config['note']}\n"
 
-    if not context: context = "데이터 없음. 일반적인 마케팅 톤 사용."
+    if not context: context = "데이터 없음."
 
-    # ★ 글자수 제한 프롬프트 강화 ★
+    # ★ 프롬프트 대폭 강화: 이모지 모방 명령 추가 ★
     prompt = f"""
-    Role: Senior Copywriter.
+    Role: Viral Marketing Copywriter.
     
     [Mission]
-    1. Analyze style from [Reference].
+    1. **STYLE CLONING:** Analyze [Reference] deeply. Mimic the **Emoji Usage** (frequency, type, placement) exactly.
+       - If [Reference] uses '🔥', you use '🔥'.
+       - If [Reference] uses 'ㅠㅠ', you use 'ㅠㅠ'.
+       - Don't be too formal. Be trendy.
     2. Create 10 marketing messages for '{keyword}' based on [News].
-    3. **STRICTLY FOLLOW CHARACTER LIMITS:**
-       - **Title:** UNDER 20 Korean characters (Short & Impactful).
-       - **Body:** UNDER 60 Korean characters (Concise).
+    3. **STRICT LIMITS:**
+       - **Title:** UNDER 20 Korean characters.
+       - **Body:** UNDER 60 Korean characters.
     4. Apply [User Request].
 
-    [Reference]
+    [Reference (Mimic this style & emojis)]
     {context}
 
     [News]
@@ -116,7 +118,7 @@ col3, col4 = st.columns([1, 1])
 with col3:
     target = st.text_input("🎯 타겟 설정", placeholder="예: 30대 직장인")
 with col4:
-    note = st.text_input("📝 요청사항", placeholder="예: 도파민 강조")
+    note = st.text_input("📝 요청사항", placeholder="예: 이모지 많이 써줘")
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
     if not keyword:
@@ -126,10 +128,10 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         status_box.write("🔍 네이버 뉴스 검색 중...")
         search_info = get_naver_search(keyword)
         
-        status_box.write("📚 구글 시트 & 모델 로딩 중...")
+        status_box.write("📚 이모지 & 톤앤매너 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write("🤖 글자 수 맞춰서 작성 중...")
+        status_box.write("🤖 글자 수 & 스타일 맞춤 작성 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
