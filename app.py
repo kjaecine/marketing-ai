@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
+from google import genai # 신형 라이브러리 임포트
 import requests
 from bs4 import BeautifulSoup
 import io
@@ -12,13 +12,13 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Final Fix)")
-st.markdown(f"**[안전 모드]** 모델을 못 찾으면 자동으로 다른 모델을 연결합니다.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (New GenAI SDK)")
+st.markdown(f"**[구글 최신 SDK 적용]** + **[Gemini 1.5 Flash]** + **[법적 문구 자동]**")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅ 안전 연결 시스템 가동 중")
+    st.success("✅ Google GenAI(신형) 연동됨")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
@@ -47,7 +47,8 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    genai.configure(api_key=api_key)
+    # ★ 신형 SDK 클라이언트 초기화 ★
+    client = genai.Client(api_key=api_key)
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -63,8 +64,8 @@ def generate_plan(api_key, context, keyword, info, user_config):
     1. **STYLE CLONING:** Mimic the Emoji Usage and Tone from [Reference].
     2. Create 10 marketing messages for '{keyword}'.
     3. **STRICT LIMITS:**
-       - **Title:** UNDER 20 Korean characters.
-       - **Body:** UNDER 40 Korean characters.
+       - **Title:** UNDER 22 Korean characters.
+       - **Body:** UNDER 60 Korean characters.
     4. Apply [User Request].
 
     [Reference]
@@ -81,20 +82,24 @@ def generate_plan(api_key, context, keyword, info, user_config):
     (CSV format with '|' separator, Header included)
     """
 
-    # ★ 핵심 로직: 모델 연결 시도 및 자동 전환 ★
-    # 1차 시도: 1.5 Flash (가장 빠르고 무료 할당량 많음)
+    # ★ 신형 모델 호출 방식 (client.models.generate_content) ★
+    # 모델명은 'gemini-1.5-flash'를 그대로 사용하면 됩니다.
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text, "gemini-1.5-flash"
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
+        return response.text, "gemini-1.5-flash (New SDK)"
     except Exception as e:
-        # 실패하면(404 등) 바로 2차 시도: Gemini Pro (구형이지만 안정적)
+        # 1.5 실패 시 혹시 모를 2.0 시도 (미래 대비)
         try:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(prompt)
-            return response.text, "gemini-pro (Fallback)"
-        except Exception as e2:
-            raise e2 # 이것도 안 되면 진짜 에러
+            response = client.models.generate_content(
+                model='gemini-2.0-flash-exp', # 최신 실험 모델
+                contents=prompt
+            )
+            return response.text, "gemini-2.0-flash (Fallback)"
+        except:
+             raise e
 
 # --- 🖥️ 메인 화면 UI ---
 
@@ -121,7 +126,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         status_box.write("📚 구글 시트 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write(f"🤖 최적의 모델 연결 중...")
+        status_box.write(f"🤖 New SDK로 생성 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
@@ -135,7 +140,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
                 lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경"
             )
             
-            status_box.update(label=f"✅ 완료! (연결된 모델: {used_model})", state="complete", expanded=False)
+            status_box.update(label=f"✅ 완료! (모델: {used_model})", state="complete", expanded=False)
             
             st.subheader("📊 생성된 마케팅 기획안")
             st.dataframe(df, use_container_width=True)
