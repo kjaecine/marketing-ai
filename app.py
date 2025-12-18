@@ -13,39 +13,17 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
 st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Final Fix)")
-st.markdown(f"**[모델 자동 탐색]** + **[법적 문구 자동 삽입]** 버전입니다.")
+st.markdown(f"**[안전 모드]** 모델을 못 찾으면 자동으로 다른 모델을 연결합니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅ 모델 연결 시스템 재구축됨")
+    st.success("✅ 안전 연결 시스템 가동 중")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
 # --- 🔧 핵심 함수들 ---
-
-def get_best_model(api_key):
-    """
-    내 API 키로 사용 가능한 모델 목록을 실제로 조회해서
-    가장 성능 좋고 저렴한 모델을 선택합니다. (404 원천 차단)
-    """
-    genai.configure(api_key=api_key)
-    try:
-        # 실제 사용 가능한 모델 리스트 조회
-        available_models = [m.name for m in genai.list_models()]
-        
-        # 우선순위: 1.5 Flash -> 1.5 Pro -> 1.0 Pro
-        if 'models/gemini-1.5-flash' in available_models: return 'models/gemini-1.5-flash'
-        if 'models/gemini-1.5-pro' in available_models: return 'models/gemini-1.5-pro'
-        if 'models/gemini-1.0-pro' in available_models: return 'models/gemini-1.0-pro'
-        if 'models/gemini-pro' in available_models: return 'models/gemini-pro'
-        
-        # 목록에 없어도 일단 기본값 리턴
-        return 'gemini-1.5-flash'
-    except:
-        # 조회 실패 시 가장 안전한 모델
-        return 'gemini-pro'
 
 def get_sheet_data(sheet_id, gid):
     try:
@@ -69,10 +47,7 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    # 1. 최적의 모델 찾기
-    model_name = get_best_model(api_key)
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -105,9 +80,21 @@ def generate_plan(api_key, context, keyword, info, user_config):
     대분류|캠페인|상세타겟_상세타깃_상세설명|추천 콘텐츠|제목|내용
     (CSV format with '|' separator, Header included)
     """
-    
-    response = model.generate_content(prompt)
-    return response.text, model_name
+
+    # ★ 핵심 로직: 모델 연결 시도 및 자동 전환 ★
+    # 1차 시도: 1.5 Flash (가장 빠르고 무료 할당량 많음)
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text, "gemini-1.5-flash"
+    except Exception as e:
+        # 실패하면(404 등) 바로 2차 시도: Gemini Pro (구형이지만 안정적)
+        try:
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(prompt)
+            return response.text, "gemini-pro (Fallback)"
+        except Exception as e2:
+            raise e2 # 이것도 안 되면 진짜 에러
 
 # --- 🖥️ 메인 화면 UI ---
 
@@ -134,7 +121,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         status_box.write("📚 구글 시트 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write(f"🤖 모델 연결 중...")
+        status_box.write(f"🤖 최적의 모델 연결 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
