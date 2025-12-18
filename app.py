@@ -118,4 +118,40 @@ with col4:
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
     if not keyword:
-        st.warning
+        st.warning("주제를 입력해주세요.")
+    else:
+        status_box = st.status("작업을 진행 중입니다...", expanded=True)
+        status_box.write("🔍 네이버 뉴스 검색 중...")
+        search_info = get_naver_search(keyword)
+        
+        status_box.write("📚 구글 시트 학습 중...")
+        sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
+        
+        status_box.write("🤖 AI 생성 및 법적 문구 적용 중...")
+        try:
+            config = {"campaign": campaign, "target": target, "note": note}
+            raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
+            
+            clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
+            df = pd.read_csv(io.StringIO(clean_csv), sep='|')
+            
+            # ★ 핵심 수정: 법적 문구 강제 삽입 구간 ★
+            # 데이터프레임의 '내용' 컬럼을 찾아서 앞뒤에 문구 붙이기
+            content_col = [c for c in df.columns if '내용' in c][0] # '내용'이 포함된 컬럼 찾기
+            
+            # (광고) + 본문 + 수신거부 결합
+            df[content_col] = df[content_col].apply(
+                lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경"
+            )
+            
+            status_box.update(label=f"✅ 완료! (모델: {used_model})", state="complete", expanded=False)
+            
+            st.subheader("📊 생성된 마케팅 기획안")
+            st.dataframe(df, use_container_width=True)
+            
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 엑셀 다운로드", csv, f"{keyword}_plan.csv", "text/csv")
+            
+        except Exception as e:
+            status_box.update(label="❌ 오류", state="error")
+            st.error(f"에러: {e}")
