@@ -86,3 +86,59 @@ def get_sheet_data(sheet_id, gid):
     except: return None
 
 def get_naver_search(keyword):
+    try:
+        url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sm=tab_opt&sort=1"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        news = [f"[{item.select_one('.news_tit').get_text()}]: {item.select_one('.news_dsc').get_text()}" for item in soup.select(".news_area")[:5]]
+        return "\n".join(news) if news else "검색 결과 없음"
+    except: return "크롤링 차단됨"
+
+# --- 메인 실행 화면 ---
+col1, col2 = st.columns([2, 1])
+with col1:
+    keyword = st.text_input("📢 홍보할 주제", placeholder="예: 환승연애4")
+with col2:
+    campaign = st.text_input("🔖 캠페인명", placeholder="예: 런칭알림")
+col3, col4 = st.columns([1, 1])
+with col3:
+    target = st.text_input("🎯 타겟 설정", placeholder="예: 30대 직장인")
+with col4:
+    note = st.text_input("📝 요청사항", placeholder="예: 이모지 많이")
+
+if st.button("🚀 기획안 생성 시작", type="primary"):
+    if not keyword:
+        st.warning("주제를 입력해주세요.")
+    else:
+        status_box = st.status("작업을 진행 중입니다...", expanded=True)
+        
+        status_box.write("🔍 네이버 뉴스 & 시트 데이터 수집 중...")
+        search_info = get_naver_search(keyword)
+        sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
+        
+        status_box.write("🤖 Gemini 1.5 Flash 가동 중 (New Key)...")
+        try:
+            prompt = f"Role: Copywriter.\nRef: {sheet_data}\nNews: {search_info}\nRequest: {note}\nCreate 5 copies for {keyword}. Output Format: CSV with '|' separator."
+            
+            # 새 키로 실행
+            raw_text, used_model = call_gemini_final(FIXED_API_KEY, prompt)
+            
+            # 후처리
+            clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
+            df = pd.read_csv(io.StringIO(clean_csv), sep='|')
+            
+            # 법적 문구 추가
+            content_col = [c for c in df.columns if '내용' in c][0] 
+            df[content_col] = df[content_col].apply(lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경")
+            
+            status_box.update(label=f"✅ 성공! (모델: {used_model})", state="complete", expanded=False)
+            st.subheader("📊 생성된 마케팅 기획안")
+            st.dataframe(df, use_container_width=True)
+            
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 엑셀 다운로드", csv, f"{keyword}_plan.csv", "text/csv")
+            
+        except Exception as e:
+            status_box.update(label="❌ 오류 발생", state="error")
+            st.error(f"에러 내용: {e}")
