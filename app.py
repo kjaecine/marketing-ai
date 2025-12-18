@@ -15,7 +15,7 @@ with st.sidebar:
     st.header("⚙️ 설정")
     
     # [보안] 코드가 아니라 여기서 직접 입력받습니다.
-    user_api_key = st.text_input("AIzaSyA1HhzAK2y_TCKjb1tG3M7GHnmC5uKh4WM", type="password", help="새로 발급받은 키를 여기에 넣으세요.")
+    user_api_key = st.text_input("Google API Key 입력", type="password", help="새로 발급받은 키를 여기에 넣으세요.")
     
     if not user_api_key:
         st.warning("⚠️ API 키를 입력해야 작동합니다.")
