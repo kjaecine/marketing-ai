@@ -8,7 +8,7 @@ import io
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
 
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Stable Version)")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Auto-Detect Model)")
 st.markdown("구글 시트의 **톤앤매너**를 학습하고, **네이버 최신 뉴스**를 반영하여 기획안을 작성합니다.")
 
 # --- 👈 사이드바: 설정 구간 ---
@@ -23,9 +23,24 @@ with st.sidebar:
 
 # --- 🔧 핵심 함수들 ---
 
-def configure_genai(api_key):
-    """API 키 설정 및 모델 준비"""
+def get_available_model(api_key):
+    """
+    내 API 키로 사용 가능한 모델을 자동으로 찾아냅니다. (404 에러 방지)
+    """
     genai.configure(api_key=api_key)
+    try:
+        # 사용 가능한 모델 목록을 조회
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                # 1순위: Flash 모델 (빠름)
+                if 'flash' in m.name: return m.name
+                # 2순위: Pro 모델 (성능 좋음)
+                if 'pro' in m.name: return m.name
+        # 목록 조회는 됐는데 딱히 못 찾았으면 기본값
+        return 'models/gemini-pro'
+    except:
+        # 목록 조회조차 실패하면 가장 기본 모델 반환
+        return 'models/gemini-pro'
 
 def get_sheet_data(sheet_id, gid):
     """구글 시트 데이터 가져오기 (최신 30개)"""
@@ -57,14 +72,13 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    """기획안 생성 (안정적인 google-generativeai 라이브러리 사용)"""
-    configure_genai(api_key)
+    """기획안 생성"""
+    # 1. 모델 자동 탐색 (여기가 핵심!)
+    model_name = get_available_model(api_key)
     
-    # 모델 이름 자동 선택 (에러 방지)
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except:
-        model = genai.GenerativeModel('gemini-pro')
+    # 2. 모델 설정
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -97,7 +111,7 @@ def generate_plan(api_key, context, keyword, info, user_config):
     """
     
     response = model.generate_content(prompt)
-    return response.text
+    return response.text, model_name
 
 # --- 🖥️ 메인 화면 UI ---
 
@@ -132,16 +146,18 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         sheet_data = get_sheet_data(SPREADSHEET_ID, SHEET_GID)
         
         # 3. 생성
-        status_box.write("🤖 AI 기획안 작성 중...")
+        status_box.write("🤖 모델을 찾고 기획안을 작성 중...")
         try:
             user_config = {"campaign": campaign, "target": target, "note": note}
-            raw_text = generate_plan(GEMINI_API_KEY, sheet_data, keyword, search_info, user_config)
+            
+            # 생성 함수 호출
+            raw_text, used_model = generate_plan(GEMINI_API_KEY, sheet_data, keyword, search_info, user_config)
             
             # 4. 결과 변환
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
             
-            status_box.update(label="✅ 생성 완료!", state="complete", expanded=False)
+            status_box.update(label=f"✅ 생성 완료! (사용 모델: {used_model})", state="complete", expanded=False)
             
             st.subheader("📊 생성된 마케팅 기획안")
             st.data_editor(df, num_rows="dynamic", use_container_width=True)
