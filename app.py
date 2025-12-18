@@ -12,13 +12,13 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Limit Free Ver)")
-st.markdown(f"**[하루 1,500회 무료 모델(1.5-flash) 고정]** + **[법적 문구 자동 삽입]** 버전입니다.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Final Stable)")
+st.markdown(f"**[자동 모델 전환]** + **[법적 문구 자동 삽입]** 버전입니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅ 1.5 Flash 모델 고정됨 (RPD 1500)")
+    st.success("✅ 모델 자동 최적화 적용됨")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
@@ -49,11 +49,18 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    """기획안 생성"""
-    # ★ 핵심 수정: 모델 자동 탐색 제거하고 1.5-flash로 강제 고정 ★
-    model_name = 'gemini-1.5-flash' 
+    """기획안 생성 (모델 자동 전환 로직 탑재)"""
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
+    
+    # ★ 핵심 수정: 1.5 Flash 시도 -> 실패 시 Pro 자동 전환 ★
+    model_name = 'gemini-1.5-flash'
+    try:
+        # 테스트용 모델 생성 (에러 체크)
+        model = genai.GenerativeModel(model_name)
+    except:
+        # 1.5가 없으면 구형 Pro 모델 사용 (404 방지)
+        model_name = 'gemini-pro'
+        model = genai.GenerativeModel(model_name)
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -87,8 +94,18 @@ def generate_plan(api_key, context, keyword, info, user_config):
     (CSV format with '|' separator, Header included)
     """
     
-    response = model.generate_content(prompt)
-    return response.text, model_name
+    # 실행 시도 (만약 여기서도 에러나면 진짜 모델 문제)
+    try:
+        response = model.generate_content(prompt)
+        return response.text, model_name
+    except Exception as e:
+        # 1.5 Flash에서 에러나면 Pro로 재시도
+        if '404' in str(e) or 'not found' in str(e):
+            fallback_model = genai.GenerativeModel('gemini-pro')
+            response = fallback_model.generate_content(prompt)
+            return response.text, "gemini-pro (Fallback)"
+        else:
+            raise e # 다른 에러면 그냥 띄움
 
 # --- 🖥️ 메인 화면 UI ---
 
@@ -115,7 +132,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         status_box.write("📚 구글 시트 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write(f"🤖 AI(1.5-Flash)가 작성 중...")
+        status_box.write(f"🤖 최적의 모델로 작성 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
