@@ -12,21 +12,42 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 
 # --- 🎨 페이지 설정 ---
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🧞‍♂️", layout="wide")
-st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Final Stable)")
-st.markdown(f"**[자동 모델 전환]** + **[법적 문구 자동 삽입]** 버전입니다.")
+st.title("🧞‍♂️ AI 마케팅 카피 생성기 (Final Fix)")
+st.markdown(f"**[모델 자동 탐색]** + **[법적 문구 자동 삽입]** 버전입니다.")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
     st.header("⚙️ 설정 확인")
-    st.success("✅ 모델 자동 최적화 적용됨")
+    st.success("✅ 모델 연결 시스템 재구축됨")
     
     sheet_id_input = st.text_input("구글 시트 ID", value=FIXED_SHEET_ID)
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
 
 # --- 🔧 핵심 함수들 ---
 
+def get_best_model(api_key):
+    """
+    내 API 키로 사용 가능한 모델 목록을 실제로 조회해서
+    가장 성능 좋고 저렴한 모델을 선택합니다. (404 원천 차단)
+    """
+    genai.configure(api_key=api_key)
+    try:
+        # 실제 사용 가능한 모델 리스트 조회
+        available_models = [m.name for m in genai.list_models()]
+        
+        # 우선순위: 1.5 Flash -> 1.5 Pro -> 1.0 Pro
+        if 'models/gemini-1.5-flash' in available_models: return 'models/gemini-1.5-flash'
+        if 'models/gemini-1.5-pro' in available_models: return 'models/gemini-1.5-pro'
+        if 'models/gemini-1.0-pro' in available_models: return 'models/gemini-1.0-pro'
+        if 'models/gemini-pro' in available_models: return 'models/gemini-pro'
+        
+        # 목록에 없어도 일단 기본값 리턴
+        return 'gemini-1.5-flash'
+    except:
+        # 조회 실패 시 가장 안전한 모델
+        return 'gemini-pro'
+
 def get_sheet_data(sheet_id, gid):
-    """구글 시트 데이터 가져오기 (인코딩 강화)"""
     try:
         url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
         df = pd.read_csv(url, encoding='utf-8', on_bad_lines='skip')
@@ -37,7 +58,6 @@ def get_sheet_data(sheet_id, gid):
         return None
 
 def get_naver_search(keyword):
-    """네이버 뉴스 크롤링"""
     try:
         url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sm=tab_opt&sort=1"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -49,18 +69,10 @@ def get_naver_search(keyword):
         return "크롤링 차단됨 (기본 정보로 진행)"
 
 def generate_plan(api_key, context, keyword, info, user_config):
-    """기획안 생성 (모델 자동 전환 로직 탑재)"""
+    # 1. 최적의 모델 찾기
+    model_name = get_best_model(api_key)
     genai.configure(api_key=api_key)
-    
-    # ★ 핵심 수정: 1.5 Flash 시도 -> 실패 시 Pro 자동 전환 ★
-    model_name = 'gemini-1.5-flash'
-    try:
-        # 테스트용 모델 생성 (에러 체크)
-        model = genai.GenerativeModel(model_name)
-    except:
-        # 1.5가 없으면 구형 Pro 모델 사용 (404 방지)
-        model_name = 'gemini-pro'
-        model = genai.GenerativeModel(model_name)
+    model = genai.GenerativeModel(model_name)
     
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
@@ -94,18 +106,8 @@ def generate_plan(api_key, context, keyword, info, user_config):
     (CSV format with '|' separator, Header included)
     """
     
-    # 실행 시도 (만약 여기서도 에러나면 진짜 모델 문제)
-    try:
-        response = model.generate_content(prompt)
-        return response.text, model_name
-    except Exception as e:
-        # 1.5 Flash에서 에러나면 Pro로 재시도
-        if '404' in str(e) or 'not found' in str(e):
-            fallback_model = genai.GenerativeModel('gemini-pro')
-            response = fallback_model.generate_content(prompt)
-            return response.text, "gemini-pro (Fallback)"
-        else:
-            raise e # 다른 에러면 그냥 띄움
+    response = model.generate_content(prompt)
+    return response.text, model_name
 
 # --- 🖥️ 메인 화면 UI ---
 
@@ -132,7 +134,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
         status_box.write("📚 구글 시트 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write(f"🤖 최적의 모델로 작성 중...")
+        status_box.write(f"🤖 모델 연결 중...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             raw_text, used_model = generate_plan(FIXED_API_KEY, sheet_data, keyword, search_info, config)
@@ -146,7 +148,7 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
                 lambda x: f"(광고) {str(x).strip()}\n*수신거부:설정>변경"
             )
             
-            status_box.update(label=f"✅ 완료! (모델: {used_model})", state="complete", expanded=False)
+            status_box.update(label=f"✅ 완료! (연결된 모델: {used_model})", state="complete", expanded=False)
             
             st.subheader("📊 생성된 마케팅 기획안")
             st.dataframe(df, use_container_width=True)
