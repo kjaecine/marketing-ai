@@ -6,40 +6,27 @@ import io
 from duckduckgo_search import DDGS
 
 # --- 🎨 페이지 설정 ---
-st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
-st.title("⚡ AI 마케팅 카피 생성기 (High RPD Enforcer)")
-st.markdown("🚀 **일일 1,500회 제공되는 'Flash' 모델만 강제로 사용합니다.** (Pro 모델 사용 안 함)")
+st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="🔓", layout="wide")
+st.title("🔓 AI 마케팅 카피 생성기 (Open Model Select)")
+st.markdown("⚠️ **AI가 모델을 추천하지 않습니다. 사용 가능한 모델을 직접 선택하세요.**")
 
 # --- 🔧 유틸리티 함수 ---
 
-def get_high_rpd_model(api_key):
+def get_all_models(api_key):
     """
-    [핵심] 사용자 계정에서 'Flash'가 포함된 고용량 모델만 찾아냅니다.
-    Pro 모델(RPD 50회)이 잡히면 과감히 버립니다.
+    필터링 없이 계정에서 접근 가능한 '모든' 모델을 가져옵니다.
     """
     genai.configure(api_key=api_key)
     try:
-        all_models = []
+        model_list = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                all_models.append(m.name)
-        
-        # 필터링 1: 2.0 Flash 계열 (최신, 빠름)
-        for m in all_models:
-            if 'gemini-2.0-flash' in m: return m
-            
-        # 필터링 2: 1.5 Flash 계열 (가장 안정적, 1500회 보장)
-        for m in all_models:
-            if 'gemini-1.5-flash' in m and '8b' not in m: return m
-            
-        # 필터링 3: 1.5 Flash-8b (초경량)
-        for m in all_models:
-            if 'gemini-1.5-flash' in m: return m
-            
-        return None # Flash 모델이 하나도 없으면 None 반환 (Pro는 안 씀)
-        
+                # 모델 이름에서 'models/' 접두사 제거하고 저장
+                name = m.name.replace('models/', '')
+                model_list.append(name)
+        return model_list
     except Exception as e:
-        return None
+        return []
 
 def get_news_search_ddg(keyword):
     """DuckDuckGo 뉴스 검색"""
@@ -64,10 +51,19 @@ def get_sheet_data(sheet_id, gid):
     except:
         return None
 
-def generate_plan(api_key, model_name, context, keyword, info, user_config):
+def generate_plan_custom(api_key, model_name, context, keyword, info, user_config):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
     
+    # 사용자가 선택/입력한 모델명으로 생성 모델 초기화
+    target_model = model_name
+    # 만약 'models/'가 안 붙어있으면 붙여줌 (안전장치)
+    if not target_model.startswith('models/') and not target_model.startswith('tunedModels/'):
+         model_name_api = f'models/{target_model}'
+    else:
+         model_name_api = target_model
+
+    model = genai.GenerativeModel(model_name_api)
+
     custom_instruction = ""
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
     if user_config['campaign']: custom_instruction += f"- 캠페인: {user_config['campaign']}\n"
@@ -100,6 +96,7 @@ def generate_plan(api_key, model_name, context, keyword, info, user_config):
     (CSV format with '|' separator. NO markdown.)
     """
     
+    # 안전 필터 해제
     safety_settings = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -115,19 +112,35 @@ with st.sidebar:
     st.header("⚙️ 설정")
     user_api_key = st.text_input("Google API Key", type="password")
     
-    selected_model = None
-    if user_api_key:
-        # [핵심] Flash 모델만 찾음
-        found_model = get_high_rpd_model(user_api_key)
-        
-        if found_model:
-            st.success(f"✅ 고속 모델 연결됨:\n{found_model}")
-            st.caption("하루 1,500회 무료 제공 모델입니다.")
-            selected_model = found_model
-        else:
-            st.error("❌ 이 API 키로는 'Flash(고속)' 모델을 쓸 수 없습니다.")
-            st.warning("Google AI Studio에서 새 프로젝트를 만들고 키를 다시 받아보세요. (Pro 모델은 RPD가 너무 낮아 제외했습니다.)")
+    final_model_choice = None
 
+    if user_api_key:
+        # 1. 사용 가능 모델 목록 가져오기
+        available = get_all_models(user_api_key)
+        
+        # 탭을 나눠서 제공 (목록 선택 vs 직접 입력)
+        tab1, tab2 = st.tabs(["📋 목록에서 선택", "⌨️ 직접 입력"])
+        
+        with tab1:
+            if available:
+                selected_from_list = st.selectbox("사용 가능한 모델 목록", available)
+                st.caption(f"감지된 모델 개수: {len(available)}개")
+            else:
+                st.error("API 키로 조회된 모델이 없습니다. (직접 입력을 시도해보세요)")
+                selected_from_list = None
+        
+        with tab2:
+            manual_input = st.text_input("모델명 직접 입력", placeholder="예: gemini-2.0-flash-lite-preview-02-05")
+            st.caption("목록에 없어도 구글이 출시한 신규 모델명을 알면 입력하세요.")
+        
+        # 최종 모델 결정 로직
+        if manual_input:
+            final_model_choice = manual_input
+            st.info(f"👉 **직접 입력한 모델**을 사용합니다: `{final_model_choice}`")
+        elif selected_from_list:
+            final_model_choice = selected_from_list
+            st.info(f"👉 **선택한 모델**을 사용합니다: `{final_model_choice}`")
+            
     st.divider()
     sheet_id_input = st.text_input("구글 시트 ID", value='1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw')
     sheet_gid_input = st.text_input("시트 GID (탭 번호)", value="0")
@@ -149,13 +162,14 @@ with col4:
 if st.button(":rocket: 기획안 생성 시작", type="primary"):
     if not user_api_key:
         st.error("🚨 API 키를 입력해주세요.")
-    elif not selected_model:
-        st.error("🚨 RPD가 높은 Flash 모델을 찾지 못해 작업을 중단합니다.")
+    elif not final_model_choice:
+        st.error("🚨 사용할 모델을 선택하거나 입력해주세요.")
     elif not keyword:
         st.warning("주제를 입력해주세요.")
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
+        # 1. 검색
         status_box.write(":mag: 최신 뉴스 검색 중 (DuckDuckGo)...")
         search_info = get_news_search_ddg(keyword)
         
@@ -164,14 +178,18 @@ if st.button(":rocket: 기획안 생성 시작", type="primary"):
         else:
              status_box.write("✅ 최신 정보 확보 완료!")
         
+        # 2. 시트
         status_box.write(":books: 구글 시트 학습 중...")
         sheet_data = get_sheet_data(sheet_id_input, sheet_gid_input)
         
-        status_box.write(f":robot_face: {selected_model} 엔진 가동...")
+        # 3. 생성
+        status_box.write(f":robot_face: `{final_model_choice}` 엔진 가동...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
-            raw_text = generate_plan(user_api_key, selected_model, sheet_data, keyword, search_info, config)
             
+            raw_text = generate_plan_custom(user_api_key, final_model_choice, sheet_data, keyword, search_info, config)
+            
+            # 파싱 & 후처리
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             df = pd.read_csv(io.StringIO(clean_csv), sep='|')
             
@@ -184,7 +202,7 @@ if st.button(":rocket: 기획안 생성 시작", type="primary"):
                     return f"(광고) {text}\n*수신거부:설정>변경"
                 df[content_col] = df[content_col].apply(final_formatter)
             
-            status_box.update(label=f":white_check_mark: 완료! ({selected_model})", state="complete", expanded=False)
+            status_box.update(label=f":white_check_mark: 완료! ({final_model_choice})", state="complete", expanded=False)
             st.subheader(":bar_chart: 생성된 마케팅 기획안")
             st.dataframe(df, use_container_width=True)
             
@@ -194,5 +212,7 @@ if st.button(":rocket: 기획안 생성 시작", type="primary"):
         except Exception as e:
             status_box.update(label=":x: 오류", state="error")
             st.error(f"에러 내용: {e}")
-            if "429" in str(e) or "Quota" in str(e):
-                st.error("이 키는 'Flash' 모델조차 할당량이 초과되었거나 막혀있습니다. 새 구글 계정으로 키를 생성해보세요.")
+            if "404" in str(e):
+                st.warning("해당 모델명을 찾을 수 없습니다. 이름이 정확한지 확인하거나 목록에 있는 다른 모델을 써보세요.")
+            elif "429" in str(e):
+                st.warning(f"선택하신 모델 `{final_model_choice}`의 사용량이 초과되었습니다.")
