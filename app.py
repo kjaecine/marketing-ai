@@ -4,7 +4,7 @@ import json
 import pandas as pd
 
 # --- 🔒 [사용자 고정 설정] ---
-FIXED_API_KEY = 'AIzaSyBKeWH-ztYroAmyTk7KX9OxKHGqyKkD48k'.strip() 
+FIXED_API_KEY = 'AIzaSyDRM_1h6IEoSnf06auPiqk2nj-Cx2lVmKM'.strip() 
 # -------------------------
 
 st.set_page_config(page_title="API 정밀 진단기", page_icon="🩺", layout="wide")
