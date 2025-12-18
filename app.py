@@ -15,8 +15,8 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
-st.title("⚡ AI 마케팅 카피 생성기 (Trendy & Cute Ver)")
-st.markdown("반말/이모지 모드 + 불필요한 컬럼 삭제 + 제목 최적화가 적용되었습니다.")
+st.title("⚡ AI 마케팅 카피 생성기 (Precision Mode)")
+st.markdown("공백 제외 62자(법적문구 포함) 정밀 타격 + 슬랭 제거 + 학습 300개")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
@@ -33,18 +33,18 @@ def clean_and_format_legal_text(text):
     
     # 1. 중복 법적 문구 제거
     text = text.replace("(광고)", "").replace("*수신거부:설정>변경", "")
+    text = text.replace('"', '').replace("'", "")
     
-    # 2. 외국어 제거 (이모지는 살림)
+    # 2. 저품질 슬랭 삭제
+    text = text.replace("ㅋㅋ", "").replace("ㅎㅎ", "").replace("ㅠㅠ", "").replace("ㄷㄷ", "")
+    
+    # 3. 외국어 제거
     foreign_pattern = re.compile(r'[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u0600-\u06FF]+')
     text = foreign_pattern.sub('', text)
     
-    # 3. 공백 정리
+    # 4. 공백 정리
     text = text.strip()
     
-    # 4. 내용 보강 (너무 짧으면 귀여운 문구 추가)
-    if len(text) < 20:
-        text += " 얼른 확인해봐! 🏃‍♀️💨"
-        
     # 5. 법적 문구 부착
     return f"(광고) {text}\n*수신거부:설정>변경"
 
@@ -62,19 +62,20 @@ def get_raw_sheet_text(sheet_id, gid):
         if len(all_rows) < 2: return "데이터 없음"
         
         learned_data = []
-        target_rows = all_rows[1:][-50:] 
+        target_rows = all_rows[1:][-300:] # 300개 학습
         
         for row in target_rows:
             clean_row = [cell.strip() for cell in row if cell.strip()]
             if len(clean_row) >= 2:
-                row_str = " | ".join(clean_row)
-                learned_data.append(row_str)
+                if len("".join(clean_row)) > 20:
+                    row_str = " | ".join(clean_row)
+                    learned_data.append(row_str)
         
         return "\n".join(learned_data)
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- 🔧 핵심 함수: Groq 호출 (프롬프트 대수술) ---
+# --- 🔧 핵심 함수: Groq 호출 (글자수 로직 변경) ---
 def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     client = Groq(api_key=api_key)
     
@@ -82,17 +83,32 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
     if user_config['note']: custom_instruction += f"- 요청사항: {user_config['note']}\n"
 
+    # [글자수 계산 로직]
+    # 목표: 공백 제외 총 62자
+    # 고정: (광고) + *수신거부... = 16자 (공백 제외)
+    # 필요 본문: 62 - 16 = 46자 (공백 제외)
+    
     prompt = f"""
-    Role: You are a Trendy Viral Marketing Copywriter for Gen Z in Korea.
+    Role: You are a Professional Viral Marketing Copywriter (Target: Korea).
     
     [YOUR MISSION]
     Create 10 marketing messages for '{keyword}'.
     
-    [TONE & MANNER - CRITICAL]
-    1. **Casual & Friendly (Banmal):** NEVER use polite endings like "입니다", "하세요". Use "이야", "했어", "봐봐" instead. Treat the reader like a close friend.
-    2. **Emoji Bomb:** Use emojis aggressively (3~5 per message). Make it look colorful and cute. 🎀✨🍭
-    3. **Short & Catchy:** Don't explain too much. Just hook them.
-    4. **Mimic User Data:** Look at the [User's Past Data] for context, but applying the new 'Banmal' tone is more important.
+    [STRICT TITLE FORMAT]
+    **[Emoji] <{keyword}> [Trend Phrase]**
+    - Include <{keyword}>.
+    - Total length must be UNDER 22 characters (including spaces).
+    
+    [CONTENT TONE & STYLE]
+    1. **Tone:** Casual (Banmal) or Noun-ending. 
+    2. **PROHIBITED:** NO 'ㅋㅋ', 'ㅠㅠ', 'ㅎㅎ', 'ㄷㄷ'. NO foreign languages.
+    3. **Emoji:** Use 1-2 appropriate emojis.
+    4. **Mimic:** Learn patterns from [User's Past Data].
+    
+    [LENGTH CONSTRAINT - EXCLUDING SPACES]
+    - **Body Text:** Write a message where the character count **(EXCLUDING SPACES)** is exactly **45 to 48 characters**.
+    - This corresponds to roughly 60~70 characters including spaces.
+    - **Do NOT be too short.** Make sure the "non-space character count" reaches at least 45.
     
     [User's Past Data]
     {context_raw}
@@ -106,8 +122,6 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     [Output Format]
     - CSV format with '|' separator.
     - Columns: Category | Campaign | Target | Title | Body
-    - **Title:** 15~20 chars. (Short keyword or hook).
-    - **Body:** 50~70 chars. (Cute story-telling, NO legal text).
     - **Language:** Korean ONLY.
 
     **Output ONLY the data rows.**
@@ -117,8 +131,8 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.8, # 창의성 약간 높임 (귀여운 표현을 위해)
-            max_tokens=2500,
+            temperature=0.75, 
+            max_tokens=3000,
             top_p=1,
             stream=False,
             stop=None,
@@ -138,21 +152,22 @@ def get_naver_search(keyword):
         news = []
         for item in soup.select(".news_area")[:3]:
             title = item.select_one('.news_tit').get_text()
-            news.append(f"- {title}")
+            desc = item.select_one('.news_dsc').get_text()
+            news.append(f"- {title}: {desc}")
         return "\n".join(news) if news else ""
     except: return ""
 
 # --- 실행부 ---
 col1, col2 = st.columns([2, 1])
 with col1:
-    keyword = st.text_input("📢 홍보할 주제", placeholder="예: 환승연애4 (또는 로봇청소기)")
+    keyword = st.text_input("📢 홍보할 주제", placeholder="예: 환승연애4")
 with col2:
     campaign = st.text_input("🔖 캠페인명", placeholder="예: 런칭알림")
 col3, col4 = st.columns([1, 1])
 with col3:
     target = st.text_input("🎯 타겟 설정", placeholder="예: 2030 여성")
 with col4:
-    note = st.text_input("📝 요청사항", placeholder="예: 귀엽고 참신하게")
+    note = st.text_input("📝 요청사항", placeholder="예: 깔끔한 반말, 임팩트 있게")
 
 if st.button("🚀 기획안 생성 시작", type="primary"):
     if not keyword:
@@ -160,31 +175,27 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
-        status_box.write("🔍 데이터 수집 및 학습 중...")
+        status_box.write(f"🔍 시트 데이터 300개 & 뉴스 학습 중...")
         search_info = get_naver_search(keyword)
         context_raw = get_raw_sheet_text(sheet_id_input, sheet_gid_input)
         
-        status_box.write("⚡ Groq 엔진 가동 (반말/이모지 모드)...")
+        status_box.write("⚡ Groq 엔진 가동 (공백 제외 62자 타겟팅)...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             
-            # AI 생성
             raw_text, used_model = generate_copy_groq(FIXED_API_KEY, context_raw, keyword, search_info, config)
             
-            # CSV 파싱
             clean_csv = raw_text.replace('```csv', '').replace('```', '').strip()
             lines = clean_csv.split('\n')
             
             data_rows = []
             for line in lines:
-                if line.count('|') >= 3: # 컬럼 4개 이상 (대분류|캠페인|타겟|제목|내용)
+                if line.count('|') >= 3:
                     parts = line.split('|')
-                    # 헤더 제외
                     if '대분류' in parts[0] or 'Category' in parts[0] or '분류' in parts[0]:
                         continue
                     data_rows.append(parts)
             
-            # 헤더 강제 주입 (컬럼 5개로 축소)
             fixed_columns = ["대분류", "캠페인", "타겟", "제목", "내용"]
             
             if data_rows:
@@ -202,9 +213,12 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
             # 후처리
             if '내용' in df.columns:
                 df['내용'] = df['내용'].apply(clean_and_format_legal_text)
+                
+                # [디버깅용] 공백 제외 글자 수 계산해서 보여줄까? (선택사항)
+                # st.write("공백 제외 글자수:", df['내용'].apply(lambda x: len(x.replace(" ", ""))))
             
             if '제목' in df.columns:
-                df['제목'] = df['제목'].apply(lambda x: str(x).strip()[:20]) # 제목 20자 컷
+                df['제목'] = df['제목'].apply(lambda x: str(x).strip()[:22])
 
             status_box.update(label=f"✅ 완료!", state="complete", expanded=False)
             st.subheader("📊 생성된 마케팅 기획안")
