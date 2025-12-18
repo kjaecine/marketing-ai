@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 import io
 import re
 import csv
+import random # 스마트 샘플링을 위해 추가
 
 # --- 🔒 [API 키 설정] ---
 part1 = "gsk_lIDRWFZfRKNye7Il5egq"
@@ -15,8 +16,8 @@ FIXED_SHEET_ID = '1rZ4T2aiIU0OsKjMh-gX85Y2OrNoX8YzZI2AVE7CJOMw'
 # -------------------------
 
 st.set_page_config(page_title="AI 마케팅 카피 생성기", page_icon="⚡", layout="wide")
-st.title("⚡ AI 마케팅 카피 생성기 (Precision Mode)")
-st.markdown("공백 제외 62자(법적문구 포함) 정밀 타격 + 슬랭 제거 + 학습 300개")
+st.title("⚡ AI 마케팅 카피 생성기 (Smart Sampling)")
+st.markdown("토큰 한도 최적화: 최신 300개 중 **핵심 60개 랜덤 학습** + 공백 제외 62자 타겟팅")
 
 # --- 👈 사이드바 ---
 with st.sidebar:
@@ -48,7 +49,7 @@ def clean_and_format_legal_text(text):
     # 5. 법적 문구 부착
     return f"(광고) {text}\n*수신거부:설정>변경"
 
-# --- 🔧 핵심 함수: 시트 데이터 가져오기 ---
+# --- 🔧 핵심 함수: 시트 데이터 가져오기 (스마트 샘플링) ---
 def get_raw_sheet_text(sheet_id, gid):
     try:
         url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
@@ -62,12 +63,23 @@ def get_raw_sheet_text(sheet_id, gid):
         if len(all_rows) < 2: return "데이터 없음"
         
         learned_data = []
-        target_rows = all_rows[1:][-300:] # 300개 학습
+        
+        # [핵심 수정] 토큰 폭발 방지 로직
+        # 1. 일단 최신 300개를 가져옵니다. (트렌드 반영)
+        recent_rows = all_rows[1:][-300:]
+        
+        # 2. 300개는 너무 많으니(2만 토큰), 여기서 '랜덤으로 60개'만 뽑습니다.
+        # 60개면 약 4,000~5,000 토큰으로 안전권입니다.
+        if len(recent_rows) > 60:
+            target_rows = random.sample(recent_rows, 60)
+        else:
+            target_rows = recent_rows
         
         for row in target_rows:
             clean_row = [cell.strip() for cell in row if cell.strip()]
             if len(clean_row) >= 2:
-                if len("".join(clean_row)) > 20:
+                # 너무 짧은 건 학습 가치 없으니 제외
+                if len("".join(clean_row)) > 15:
                     row_str = " | ".join(clean_row)
                     learned_data.append(row_str)
         
@@ -75,7 +87,7 @@ def get_raw_sheet_text(sheet_id, gid):
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- 🔧 핵심 함수: Groq 호출 (글자수 로직 변경) ---
+# --- 🔧 핵심 함수: Groq 호출 ---
 def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     client = Groq(api_key=api_key)
     
@@ -83,10 +95,7 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     if user_config['target']: custom_instruction += f"- 타겟: {user_config['target']}\n"
     if user_config['note']: custom_instruction += f"- 요청사항: {user_config['note']}\n"
 
-    # [글자수 계산 로직]
-    # 목표: 공백 제외 총 62자
-    # 고정: (광고) + *수신거부... = 16자 (공백 제외)
-    # 필요 본문: 62 - 16 = 46자 (공백 제외)
+    # 공백 제외 45~48자 타겟팅
     
     prompt = f"""
     Role: You are a Professional Viral Marketing Copywriter (Target: Korea).
@@ -107,10 +116,10 @@ def generate_copy_groq(api_key, context_raw, keyword, info, user_config):
     
     [LENGTH CONSTRAINT - EXCLUDING SPACES]
     - **Body Text:** Write a message where the character count **(EXCLUDING SPACES)** is exactly **45 to 48 characters**.
-    - This corresponds to roughly 60~70 characters including spaces.
+    - This corresponds to roughly 60~65 characters including spaces.
     - **Do NOT be too short.** Make sure the "non-space character count" reaches at least 45.
     
-    [User's Past Data]
+    [User's Past Data (Sampled Patterns)]
     {context_raw}
     
     [Trend Info]
@@ -175,11 +184,12 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
     else:
         status_box = st.status("작업을 진행 중입니다...", expanded=True)
         
-        status_box.write(f"🔍 시트 데이터 300개 & 뉴스 학습 중...")
+        # [수정됨] 사용자에게 샘플링 사실 알림
+        status_box.write(f"🔍 시트 데이터 최신 300개 중 60개 샘플링 학습...")
         search_info = get_naver_search(keyword)
         context_raw = get_raw_sheet_text(sheet_id_input, sheet_gid_input)
         
-        status_box.write("⚡ Groq 엔진 가동 (공백 제외 62자 타겟팅)...")
+        status_box.write("⚡ Groq 엔진 가동 (토큰 최적화 모드)...")
         try:
             config = {"campaign": campaign, "target": target, "note": note}
             
@@ -213,9 +223,6 @@ if st.button("🚀 기획안 생성 시작", type="primary"):
             # 후처리
             if '내용' in df.columns:
                 df['내용'] = df['내용'].apply(clean_and_format_legal_text)
-                
-                # [디버깅용] 공백 제외 글자 수 계산해서 보여줄까? (선택사항)
-                # st.write("공백 제외 글자수:", df['내용'].apply(lambda x: len(x.replace(" ", ""))))
             
             if '제목' in df.columns:
                 df['제목'] = df['제목'].apply(lambda x: str(x).strip()[:22])
